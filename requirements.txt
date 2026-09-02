@@ -1,0 +1,8 @@
+pdfplumber>=0.11
+pandas>=2.0
+openpyxl>=3.1
+streamlit>=1.30
+pytest>=8.0
+cryptography<44        # piesprausts, lai vecākas Python/pip vides ņem gatavu wheel, nevis kompilē
+fpdf2>=2.7             # paraugu līgumu PDF ģenerēšanai (scripts/gen_paraugi.py) un testiem
+# anthropic>=0.40      # neobligāti — tikai MI ekstrakcijas režīmam līgumu modulī

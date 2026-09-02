@@ -1,0 +1,44 @@
+CIRSMAS VĒRTĪBAS APRĒĶINS
+============================================================
+
+NĪ Mežpurvi , zemes vienība 64560020029
+
+Kailcirtes: 1.nog;3.nog;4.nog;7.nog;8.nog;12.nog
+
+Cērtamais apjoms: 1039m3 ( B=499m3; Ba=391m3; A=102m3; E=34m3; Bl=13m3 )
+
+Maksimālā iegādes summa = 28 248 EUR, jeb 27.19 EUR/m3.
+
+------------------------------------------------------------
+DETALIZĒTS APRĒĶINS
+------------------------------------------------------------
+
+Kailcirtei atbilstošie nogabali:
+  1.nog | 1.54 ha x 215 m3/ha = 331.10 m3 | 4Ba3B372Ba26 1A47 | Valdošā suga Baltalksnis — cērtama bez ierobežojuma
+  3.nog | 0.6 ha x 212 m3/ha = 127.20 m3 | 5Ba372B2Ba1Bl27 | Valdošā suga Baltalksnis — cērtama bez ierobežojuma
+  4.nog | 0.34 ha x 197 m3/ha = 66.98 m3 | 6B732B601B1Ba37 | Bērzs sasniedzis ciršanas vecumu: 73 g. ≥ 71 g. (bonitāte I)
+  7.nog | 1.41 ha x 241 m3/ha = 339.81 m3 | 5B733B1E1Ba57 | Bērzs sasniedzis ciršanas vecumu: 73 g. ≥ 71 g. (bonitāte I)
+  8.nog | 0.42 ha x 250 m3/ha = 105.00 m3 | 6Ba2B572A22 | Valdošā suga Baltalksnis — cērtama bez ierobežojuma
+  12.nog | 0.27 ha x 255 m3/ha = 68.85 m3 | 7A3B56 | Apse sasniedzis ciršanas vecumu: 56 g. ≥ 41 g. (bonitāte Ia)
+
+Kailcirtei NEatbilstošie nogabali:
+  5.nog | Bērzs nav sasniedzis ne ciršanas vecumu (47 g. < 71 g.), ne caurmēru
+  9.nog | Apse nav sasniedzis ne ciršanas vecumu (22 g. < 41 g.), ne caurmēru
+  10.nog | Egle nav sasniedzis ne ciršanas vecumu (42 g. < 81 g.), ne caurmēru
+  11.nog | Apse nav sasniedzis ne ciršanas vecumu (12 g. < 41 g.), ne caurmēru
+
+Apjoms pa sugām:
+  Bērzs              498.55 m3
+  Baltalksnis        391.38 m3
+  Apse               102.30 m3
+  Egle                33.98 m3
+  Blīgzna             12.72 m3
+
+Finanses:
+  Ieņēmumi no sortimentiem:     56 321.34 EUR
+  Koku ciršana:                -11 428.23 EUR
+  Kokmateriālu pievešana:       -7 272.51 EUR
+  Transports:                   -6 233.58 EUR
+  Peļņas rezerve (10%):         -3 138.70 EUR
+  MAX IEGĀDES SUMMA:            28 248.32 EUR
+  Cena:                             27.19 EUR/m3
