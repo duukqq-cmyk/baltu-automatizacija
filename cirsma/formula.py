@@ -14,11 +14,11 @@ from dataclasses import dataclass
 # Sugu kodi — garākie vispirms, lai "Ba" nenolasītos kā "B" + "a"
 SUGU_KODI = [
     "Ba", "Bl", "Ma", "Oz", "Os", "Vī", "Vi", "Go", "Kļ", "Sa", "Ie", "Pī",
-    "P", "E", "B", "A", "L", "K", "V",
+    "P", "E", "B", "A", "L", "K", "V", "M",
 ]
 SUGU_NOSAUKUMI = {
     "P": "Priede", "E": "Egle", "B": "Bērzs", "A": "Apse", "Ba": "Baltalksnis",
-    "Ma": "Melnalksnis", "Oz": "Ozols", "Os": "Osis", "L": "Liepa", "K": "Kļava",
+    "Ma": "Melnalksnis", "M": "Melnalksnis", "Oz": "Ozols", "Os": "Osis", "L": "Liepa", "K": "Kļava",
     "Go": "Goba", "V": "Vīksna", "Vī": "Vīksna", "Bl": "Blīgzna", "Sa": "Baltais vītols",
     "Ie": "Ieva", "Pī": "Pīlādzis",
 }

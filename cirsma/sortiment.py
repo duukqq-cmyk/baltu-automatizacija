@@ -13,7 +13,7 @@ from .rules import Vertejums
 
 # Sugas kods -> matricas kolonna
 MATRICAS_KOLONNA = {
-    "P": "P", "E": "E", "B": "B", "Ma": "Ma", "A": "A", "Ba": "Ba",
+    "P": "P", "E": "E", "B": "B", "Ma": "Ma", "M": "Ma", "A": "A", "Ba": "Ba",
     "Oz": "Oz/Os", "Os": "Oz/Os",
 }
 CITI = "Citi"

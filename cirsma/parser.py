@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 
 import pdfplumber
 
+from .formula import _parse_bloks
+
 _BONITATES = ("Ia", "Ib", "IV", "III", "II", "I", "Va", "V")  # garākās vispirms
 
 # Galvenā nogabala rinda:
@@ -36,8 +38,21 @@ _SKIP_PREFIXES = (
     "Zemes vienība", "Kvartāls", "Nogabalu", "Meža zemes",
 )
 
-# Formulas turpinājuma rinda — tikai formulas fragments, nekas cits
-_CONT_RE = re.compile(r"^\s*((?:\d{1,2}[A-ZĀČĒĢĪĶĻŅŠŪŽ][a-zāčēģīķļņšūž]?)+\d{0,3})\s*$")
+# Formulas turpinājuma rinda — tikai formulas fragmenti, nekas cits.
+# Fragmentā var būt vairākas salipušas grupas (piem., "1E911E131" = "1E91 1E131"),
+# tāpēc katru vārdu pārbauda ar formulas parsētāju, nevis ar vienu regex.
+_CONT_TOKEN_RE = re.compile(r"^\d{1,2}[A-ZĀČĒĢĪĶĻŅŠŪŽ][0-9A-Za-zĀČĒĢĪĶĻŅŠŪŽāčēģīķļņšūž]*$")
+
+
+def _formulas_turpinajums(stripped: str) -> str | None:
+    """Atgriež rindu kā formulas turpinājumu, ja tā sastāv tikai no formulas blokiem."""
+    tokeni = stripped.split()
+    if not tokeni:
+        return None
+    for t in tokeni:
+        if not _CONT_TOKEN_RE.match(t) or not _parse_bloks(t):
+            return None
+    return " ".join(tokeni)
 
 # Nogabals bez mežaudzes (lauce, purvs u.tml.) — nr + platība + apraksts bez skaitļiem
 _NONFOREST_RE = re.compile(r"^\s*(?P<nog>\d{1,3})\s+(?P<platiba>\d+(?:[.,]\d+)?)\s+(?P<veids>[A-ZĀ][^\d]+?)\s*$")
@@ -130,9 +145,9 @@ def parse_inventory_pdf(pdf_path: str) -> Inventarizacija:
             continue
 
         # Formulas turpinājums (piem., "1A47" nākamajā rindā zem formulas)
-        mc = _CONT_RE.match(stripped)
-        if mc and pedejais is not None and pedejais.formula is not None:
-            pedejais.formula += " " + mc.group(1)
+        turp = _formulas_turpinajums(stripped)
+        if turp and pedejais is not None and pedejais.formula is not None:
+            pedejais.formula += " " + turp
             continue
 
         # Ne-meža nogabals (lauce u.tml.) — var būt sadalīts vairākās rindās,

@@ -25,6 +25,7 @@ CIRSANAS_VECUMS: dict[str, dict[str, int]] = {
     "K":  {"I+": 81,  "II-III": 81,  "IV-": 81},
     "B":  {"I+": 71,  "II-III": 71,  "IV-": 51},
     "Ma": {"I+": 71,  "II-III": 71,  "IV-": 71},
+    "M":  {"I+": 71,  "II-III": 71,  "IV-": 71},  # melnalksnis (VMD kods "M")
     "A":  {"I+": 41,  "II-III": 41,  "IV-": 41},
 }
 
