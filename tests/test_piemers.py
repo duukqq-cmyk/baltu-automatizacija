@@ -67,3 +67,21 @@ def test_finansu_aprekins(rezultats):
     assert fin.ienemumi_kopa == pytest.approx(56322.14, abs=2)
     assert fin.max_iegades_summa == pytest.approx(28249, abs=2)
     assert fin.cena_eur_m3 == pytest.approx(27.19, abs=0.01)
+
+
+def test_melnalksnis_kods_m():
+    """VMD formulās melnalksnis mēdz būt ar kodu "M" (piem., "6B3A1M77")."""
+    dalas = parse_formula("6B3A1M77")
+    assert [(d.suga, d.ipatsvars) for d in dalas] == [("B", 0.6), ("A", 0.3), ("M", 0.1)]
+
+
+def test_formulas_turpinajums_ar_salipusam_grupam():
+    """Turpinājuma rinda ar vairākām salipušām grupām ("1E911E131" = "1E91 1E131")."""
+    from cirsma.parser import _formulas_turpinajums
+    assert _formulas_turpinajums("1E911E131") == "1E911E131"
+    assert _formulas_turpinajums("1A47") == "1A47"
+    assert _formulas_turpinajums("2.stāvs:E45") is None
+    assert _formulas_turpinajums("Plantācijasaudze") is None
+    dalas = parse_formula("4P1312P912B81 1E911E131")
+    assert sum(d.ipatsvars for d in dalas) == pytest.approx(1.0)
+    assert dalas[0].suga == "P" and dalas[0].vecums == 131
