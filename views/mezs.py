@@ -37,8 +37,6 @@ _KOLONNA_LAUKS = {
     "Platība ha": "platiba_ha", "Krāja m³/ha": "kraja_m3_ha", "Bonitāte": "bonitate",
     "Vecums": "vecums", "Kailcirte": "kailcirte", "Apjoms m³": "apjoms_m3",
 }
-# Kailcirte kā izvēle (nevis ķeksis), lai "Jā" būtu redzams ar zaļo ✅
-KAILCIRTE_JA, KAILCIRTE_NE = "✅ Jā", "— Nē"
 
 
 def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
@@ -54,8 +52,6 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
                 continue
             if isinstance(vertiba, float) and vertiba != vertiba:  # NaN = dzēsta šūna
                 vertiba = None
-            if lauks == "kailcirte" and vertiba is not None:
-                vertiba = vertiba == KAILCIRTE_JA
             setattr(lab, lauks, vertiba)  # None -> atpakaļ uz PDF vērtību
             if lauks in ("platiba_ha", "kraja_m3_ha"):
                 lab.apjoms_m3 = None  # apjoms jāpārrēķina no jaunās platības/krājas
@@ -157,7 +153,7 @@ for v in vertejumi:
         "Bonitāte": n.bonitate,
         "Vecums": n.vecums,
         "Valdošā suga": SUGU_NOSAUKUMI.get(v.valdosa_suga, v.valdosa_suga),
-        "Kailcirte": KAILCIRTE_JA if v.atlauta_kailcirte else KAILCIRTE_NE,
+        "Kailcirte": v.atlauta_kailcirte,
         "Apjoms m³": apjoms,
         "Karogi": karogi,
     }
@@ -189,9 +185,8 @@ st.data_editor(
         "Vecums": st.column_config.NumberColumn(
             min_value=0, max_value=300, step=1, format="%d",
             help="Mainot pārvērtē kailcirtes atbilstību. Notīri šūnu, lai atjaunotu PDF vērtību."),
-        "Kailcirte": st.column_config.SelectboxColumn(
-            options=[KAILCIRTE_JA, KAILCIRTE_NE], width="small",
-            help="Manuāli iekļauj vai izslēdz nogabalu no cirsmas. Notīri šūnu, lai atjaunotu sistēmas lēmumu."),
+        "Kailcirte": st.column_config.CheckboxColumn(
+            help="Ieķeksē vai izķeksē, lai iekļautu vai izslēgtu nogabalu no cirsmas."),
         "Apjoms m³": st.column_config.NumberColumn(
             min_value=0.0, step=0.01, format="%.2f",
             help="Manuāli ievadīts apjoms aizstāj aprēķināto. Notīri šūnu, lai atjaunotu aprēķināto."),
