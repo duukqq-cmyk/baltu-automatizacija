@@ -1,4 +1,4 @@
-# ⚙️ Procesu automatizācijas platforma (Baltu Investments atlases uzdevumi)
+# ⚙️ Procesu automatizācijas platforma 
 
 Viena Streamlit lietotne ar sākuma izvēlni un diviem moduļiem:
 
