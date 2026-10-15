@@ -6,7 +6,8 @@ Izņēmums: baltalksnis (Ba) — bez vecuma vai caurmēra ierobežojuma.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 
 from .formula import parse_formula, SUGU_NOSAUKUMI
 from .parser import Nogabals
@@ -53,10 +54,73 @@ class Vertejums:
     valdosa_suga: str
     atlauta_kailcirte: bool
     pamatojums: str
+    bridinajumi: list[str] = field(default_factory=list)  # ⚠ riski / ℹ informācija / ✎ labots
+    indekss: int | None = None                # nogabala indekss inventarizācijā
+    apjoms_m3_manuali: float | None = None    # lietotāja ievadīts apjoms (aizstāj aprēķināto)
+
+
+# Kontrolsummu sliekšņi: sugu krājas ir noapaļotas līdz veseliem m³, tāpēc
+# mazos nogabalos relatīvā atšķirība var būt liela — prasām abus nosacījumus.
+KONTROLE_REL = 0.10
+KONTROLE_ABS_M3 = 3.0
+JAUNAUDZES_VECUMS = 20
+
+
+def riska_karogi(n: Nogabals, atlauta: bool) -> list[str]:
+    """Papildu pārbaudes, kas kailcirtes lēmumu nemaina, bet jāredz speciālistam."""
+    k: list[str] = []
+    planots = (n.planots or "").lower()
+
+    for josla in n.aizsargjoslas:
+        m = re.search(r"\d{8}", josla)
+        kods = m.group(0) if m else ""
+        nosaukums = josla.rsplit("/", 1)[-1].strip() or josla
+        if kods.startswith("4002"):
+            k.append(f"⚠ Ūdens objektu aizsargjosla {kods} ({nosaukums}) — kailcirte var būt ierobežota")
+        else:
+            k.append(f"⚠ Apgrūtinājums {kods} ({nosaukums}) — jāpārbauda ierobežojumi")
+
+    if n.planots:
+        if atlauta and "kailcirte" not in planots:
+            k.append(f"⚠ VMD plānotā darbība: {n.planots} (nevis kailcirte)")
+        elif not atlauta and "kailcirte" in planots:
+            k.append("ℹ VMD plāno kailcirti, bet pēc mūsu kritērijiem tā vēl nav atļauta — pārbaudīt")
+
+    if n.plantacija:
+        k.append("ℹ Plantācijas audze")
+    if atlauta and n.vecums is not None and n.vecums < JAUNAUDZES_VECUMS:
+        k.append(f"ℹ Jaunaudze ({n.vecums} g.) — kailcirte atļauta tikai sugas dēļ, pārbaudīt lietderību")
+    if n.otrais_stavs:
+        k.append(f"ℹ 2. stāvs: {n.otrais_stavs}")
+    for b in n.bojajumi:
+        k.append(f"ℹ Bojājums: {b}")
+    if n.komentari:
+        k.append(f"ℹ Komentārs: {n.komentari}")
+
+    # Kontrolsummas
+    if n.kopeja_kraja_m3 and n.kraja_m3_ha is not None:
+        aprek = n.kraja_m3_ha * n.platiba_ha
+        if abs(aprek - n.kopeja_kraja_m3) > max(KONTROLE_ABS_M3, KONTROLE_REL * n.kopeja_kraja_m3):
+            k.append(f"⚠ Krāja × platība ({aprek:.1f} m³) nesakrīt ar kopējo krāju "
+                     f"({n.kopeja_kraja_m3:.1f} m³) — manuāla pārbaude")
+    if n.sugu_kraja and n.kopeja_kraja_m3:
+        sugu_summa = sum(s.kraja_m3 if s.kraja_m3 is not None else s.kraja_m3_ha * n.platiba_ha
+                         for s in n.sugu_kraja)
+        if abs(sugu_summa - n.kopeja_kraja_m3) > max(KONTROLE_ABS_M3, KONTROLE_REL * n.kopeja_kraja_m3):
+            k.append(f"⚠ Sugu krāju summa ({sugu_summa:.0f} m³) atšķiras no kopējās krājas "
+                     f"({n.kopeja_kraja_m3:.1f} m³) — manuāla pārbaude")
+    return k
 
 
 def novertet_nogabalu(n: Nogabals) -> Vertejums | None:
     """Novērtē viena nogabala atbilstību kailcirtei. None — nav mežaudze."""
+    v = _novertet_kriterijus(n)
+    if v is not None:
+        v.bridinajumi = riska_karogi(n, v.atlauta_kailcirte)
+    return v
+
+
+def _novertet_kriterijus(n: Nogabals) -> Vertejums | None:
     if not n.ir_mezaudze or not n.formula:
         return None
 
@@ -65,6 +129,8 @@ def novertet_nogabalu(n: Nogabals) -> Vertejums | None:
     nosaukums = SUGU_NOSAUKUMI.get(suga, suga)
     # Valdošās sugas vecums: pirmās komponentes vecums; ja nav — audzes vecums
     vecums = dalas[0].vecums if dalas[0].vecums is not None else n.vecums
+    if "vecums" in n.labots:  # lietotāja labotais vecums ir noteicošais
+        vecums = n.vecums
 
     if suga in BEZ_IEROBEZOJUMA:
         return Vertejums(n, suga, True, f"Valdošā suga {nosaukums} — cērtama bez ierobežojuma")

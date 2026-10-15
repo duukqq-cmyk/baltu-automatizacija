@@ -63,6 +63,52 @@ class NogabalaApjoms:
     nog_nr: int
     kopejais_m3: float
     pa_sugam: dict[str, float]
+    metode: str = "formula"           # "formula" vai "sugu tabula"
+    nogabals: object | None = None    # atsauce uz Nogabals (vairāku kvartālu gadījumam)
+
+
+def nogabala_apjoms(n) -> tuple[float, dict[str, float], str]:
+    """Nogabala kopējais apjoms un sadalījums pa sugām.
+
+    Ja avots sniedz faktisko krāju pa sugām (gabali.lv), izmanto to — sugu
+    proporcijas no tabulas, kopsumma no "Kopējā krāja". Citādi (VMD) sadala
+    krāju × platību pēc formulas koeficientiem.
+    """
+    kopejais = n.kopeja_kraja_m3
+    if kopejais is None and n.kraja_m3_ha is not None:
+        kopejais = n.kraja_m3_ha * n.platiba_ha
+
+    if n.sugu_kraja:
+        svari: dict[str, float] = defaultdict(float)
+        for sk in n.sugu_kraja:
+            # Kopējā krāja sugai; ja nav norādīta (noapaļota uz 0), rēķina no m³/ha
+            svari[sk.suga] += sk.kraja_m3 if sk.kraja_m3 is not None else sk.kraja_m3_ha * n.platiba_ha
+        summa = sum(svari.values())
+        if summa > 0:
+            if kopejais is None:
+                kopejais = summa
+            kopejais = round(kopejais, 2)
+            return kopejais, {s: round(kopejais * v / summa, 2) for s, v in svari.items()}, "sugu tabula"
+
+    kopejais = round(kopejais or 0, 2)
+    sadalijums: dict[str, float] = defaultdict(float)
+    for dala in parse_formula(n.formula):
+        sadalijums[dala.suga] += kopejais * dala.ipatsvars
+    return kopejais, {s: round(m3, 2) for s, m3 in sadalijums.items()}, "formula"
+
+
+def vertejuma_apjoms(v: Vertejums) -> tuple[float, dict[str, float], str]:
+    """Apjoms vērtējumam: manuāli ievadītais (sugu proporcijas saglabājot) vai aprēķinātais."""
+    kopejais, sadalijums, metode = nogabala_apjoms(v.nogabals)
+    if v.apjoms_m3_manuali is None:
+        return kopejais, sadalijums, metode
+    jauns = round(float(v.apjoms_m3_manuali), 2)
+    summa = sum(sadalijums.values())
+    if summa > 0:
+        sadalijums = {s: round(jauns * m3 / summa, 2) for s, m3 in sadalijums.items()}
+    else:
+        sadalijums = {d.suga: round(jauns * d.ipatsvars, 2) for d in parse_formula(v.nogabals.formula)}
+    return jauns, sadalijums, "manuāli"
 
 
 @dataclass
@@ -98,12 +144,8 @@ def aprekinat(
         if not v.atlauta_kailcirte:
             continue
         n = v.nogabals
-        kopejais = round((n.kraja_m3_ha or 0) * n.platiba_ha, 2)
-        sadalijums: dict[str, float] = defaultdict(float)
-        for dala in parse_formula(n.formula):
-            sadalijums[dala.suga] += kopejais * dala.ipatsvars
-        sadalijums = {s: round(m3, 2) for s, m3 in sadalijums.items()}
-        apjomi.append(NogabalaApjoms(n.nr, kopejais, dict(sadalijums)))
+        kopejais, sadalijums, metode = vertejuma_apjoms(v)
+        apjomi.append(NogabalaApjoms(n.nr, kopejais, dict(sadalijums), metode, n))
         for suga, m3 in sadalijums.items():
             pa_sugam[suga] += m3
 

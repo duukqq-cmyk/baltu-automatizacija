@@ -73,6 +73,10 @@ def parse_formula(formula: str) -> list[FormulasDala]:
     """
     import itertools
 
+    # Daļa pēc "+" (piem., "7B2E1P75+M75") = sugas zem 5% no krājas — koeficienta
+    # nav, kopsummā 10 neietilpst. Apjoma sadalījumā tās netiek ņemtas vērā.
+    formula = formula.split("+", 1)[0]
+
     bloku_varianti = []
     for bloks in formula.split():
         varianti = _parse_bloks(bloks)
@@ -99,6 +103,16 @@ def parse_formula(formula: str) -> list[FormulasDala]:
             for koef, suga in pari:
                 dalas.append(FormulasDala(suga=suga, ipatsvars=koef / 10, vecums=vecums))
     return dalas
+
+
+def piejaukums(formula: str) -> list[tuple[str, int | None]]:
+    """Sugas zem 5% (formulas daļa pēc "+"), piem., "+Ba54M54" -> [("Ba", 54), ("M", 54)]."""
+    if "+" not in formula:
+        return []
+    aste = re.sub(r"\s+", "", formula.split("+", 1)[1])
+    kodi = "|".join(SUGU_KODI)
+    return [(m.group(1), int(m.group(2)) if m.group(2) else None)
+            for m in re.finditer(r"(" + kodi + r")(\d{0,3})", aste)]
 
 
 def valdosa_suga(formula: str) -> str:

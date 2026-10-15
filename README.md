@@ -1,4 +1,4 @@
-# ⚙️ Procesu automatizācijas platforma 
+# ⚙️ Procesu automatizācijas platforma (Baltu Investments atlases uzdevumi)
 
 Viena Streamlit lietotne ar sākuma izvēlni un diviem moduļiem:
 
@@ -48,9 +48,58 @@ python cli.py dati/Nogabalu_raksturojosie_raditaji_64560020029.pdf \
 # Apvienotā web saskarne (sākuma logā izvēlies moduli)
 streamlit run app.py
 
-# Testi (verifikācija pret pamācības piemēru + līgumu ekstrakcija)
+# Testi (pamācības piemērs, gabali.lv paraugi dati/gabali/, līgumu ekstrakcija)
 pytest tests/ -v
 ```
+
+## Datu avoti: VMD un gabali.lv
+
+Formāts tiek atpazīts automātiski (`parse_inventory_pdf`) — lietotājam nekas nav jāizvēlas.
+
+```
+VMD PDF ──────► parser.py (parse_vmd_pdf) ─┐
+                                           ├─► Nogabals (kopīgs modelis) ─► rules ─► sortiment ─► report
+gabali.lv PDF ► gabali.py ─────────────────┘
+```
+
+**gabali.lv** (`cirsma/gabali.py`) — LaTeX ģenerēts PDF ar tabulas līnijām:
+- garumzīmes (¯ ˇ ,) PDF ir atsevišķas rakstzīmes — tās tiek apvienotas ar burtiem pēc koordinātām;
+- tabula tiek nolasīta pa šūnām (`find_tables`), nevis ar regex; rinda lapas apakšā bez
+  vertikālajām līnijām tiek nolasīta pēc tās pašas tabulas kolonnu robežām;
+- papildu atribūti: **faktiskā krāja pa sugām**, kopējā krāja, biezība, šķērslaukums, koku skaits,
+  VMD plānotā darbība, aizsargjoslas, plantācijas audze, 2. stāvs, pēdējā cirte, bojājumi, komentāri;
+- formulas daļa pēc `+` (sugas zem 5%, piem. `7B2E1P75+M75`) koeficientu summā neietilpst.
+
+**Apjoms pa sugām**: ja avotā ir sugu tabula, izmanto faktiskās sugu proporcijas un kopējo krāju
+(precīzāk nekā sadalījums pēc formulas koeficientiem); citādi — pēc formulas kā līdz šim.
+Atskaitē redzama izmantotā metode.
+
+**Riska karogi** (kailcirtes lēmumu nemaina, bet parāda speciālistam):
+- ⚠ aizsargjoslas/apgrūtinājumi (īpaši ūdens objektu, kods 4002…) — arī VMD failiem;
+- ⚠ VMD plāno citu cirti, nevis kailcirti (vai otrādi — ℹ);
+- ⚠ kontrolsummas: krāja × platība pret kopējo krāju; sugu krāju summa pret kopējo (>10% un >3 m³);
+- ℹ plantācijas audze, jaunaudze (<20 g., cērtama tikai sugas dēļ), 2. stāvs, bojājumi, komentāri.
+
+Nogabalu numuri dažādos kvartālos atkārtojas — ja īpašumā ir vairāki kvartāli, atskaitē
+nogabals tiek apzīmēts kā `3.kv. 12.nog`.
+
+## Manuāli labojumi nogabalu tabulā
+
+Web saskarnē nogabalu tabula ir rediģējama (abiem avotiem): **Platība, Krāja m³/ha, Bonitāte,
+Vecums, Kailcirte (ķeksis), Apjoms m³**. Pēc katra labojuma viss tiek pārrēķināts
+(`cirsma/labojumi.py`):
+
+- bonitāte / vecums → kailcirtes kritēriji tiek pārvērtēti no jauna;
+- platība / krāja → apjoms = krāja × platība (sugu proporcijas saglabājas);
+- apjoms → manuāli ievadītais aizstāj aprēķināto (sugu proporcijas saglabājas);
+- kailcirtes ķeksis → manuāls lēmums aizstāj sistēmas lēmumu (pamatojumā redzams arī sistēmas lēmums);
+- dzēsta šūna → atjauno PDF vērtību; poga "Atiestatīt visus labojumus" atjauno visu.
+
+Labotie nogabali tiek atzīmēti ar ✎ tabulā, teksta un Excel atskaitē. Oriģinālie PDF dati netiek mainīti.
+
+gabali.lv avotam pie katra nogabala redzama arī PDF papildu informācija (kolonna "Info no PDF",
+sadaļa zem tabulas un atskaitēs): "Nogabala meža inventarizācija veikta …", 2. stāvs,
+platību sadalījums, pēdējā cirte, plānotā darbība u.c.
 
 ## 2. modulis: līgumu datu izvilkšana
 
@@ -85,7 +134,8 @@ pytest tests/ -v
   tie ir konfigurējami (Streamlit sānjoslā vai kodā `NOKLUSEJUMA_MATRICA`).
 - Sugas bez savas matricas kolonnas (piem., Bl — blīgzna) nonāk kolonnā "Citi"
   (100% malka), tāpat kā pamācības piemērā.
-- Nogabali, kas nav mežaudze (lauces u.tml.), netiek vērtēti.
+- Nogabali, kas nav mežaudze (lauces, bebru applūdinājumi u.tml.), netiek vērtēti.
+- Melnalksnis VMD formulās var būt gan `M`, gan `Ma` — abi tiek apstrādāti vienādi.
 
 ## Kļūdu apstrāde un robustums
 
