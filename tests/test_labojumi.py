@@ -94,3 +94,24 @@ def test_vecums_un_bonitate_parverte_kailcirti():
     assert _v(novertet_ar_labojumiem(inv.nogabali, {atsl: Labojums(bonitate="IV")}), atsl).atlauta_kailcirte
     # oriģinālie dati netiek mainīti
     assert inv.nogabali[int(atsl)].vecums == 69 and inv.nogabali[int(atsl)].bonitate == "II"
+
+
+def test_labojumu_izmainas_uzskaita_tikai_lietotaja_vertibas(inv):
+    from cirsma.labojumi import labojumu_izmainas
+    bazes = novertet_ar_labojumiem(inv.nogabali, {})
+    v0 = bazes[0]
+    atsl = str(v0.indekss)
+    n = inv.nogabali[v0.indekss]
+    lab = {atsl: Labojums(platiba_ha=(n.platiba_ha or 0) + 1, kailcirte=not v0.atlauta_kailcirte)}
+    izm = labojumu_izmainas(inv.nogabali, lab)
+    rindas = izm[v0.indekss]
+    assert any(r.startswith("Platība:") and "→" in r for r in rindas)
+    assert any(r.startswith("Kailcirte:") for r in rindas)
+    assert not any(r.startswith("Apjoms:") for r in rindas)  # pārrēķinātais apjoms nav labojums
+
+
+def test_labojumu_izmainas_ignore_nemainitu_vertibu(inv):
+    from cirsma.labojumi import labojumu_izmainas
+    v0 = novertet_ar_labojumiem(inv.nogabali, {})[0]
+    lab = {str(v0.indekss): Labojums(kailcirte=v0.atlauta_kailcirte)}
+    assert labojumu_izmainas(inv.nogabali, lab) == {}

@@ -10,7 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from cirsma.parser import parse_inventory_pdf
-from cirsma.labojumi import BONITATES, Labojums, nogabala_atslega, novertet_ar_labojumiem
+from cirsma.labojumi import (
+    BONITATES, Labojums, labojumu_izmainas, nogabala_atslega, novertet_ar_labojumiem,
+)
 from cirsma.sortiment import (
     aprekinat, vertejuma_apjoms, NOKLUSEJUMA_MATRICA, NOKLUSEJUMA_IZDEVUMI, NOKLUSEJUMA_PELNAS_REZERVE,
 )
@@ -35,6 +37,8 @@ _KOLONNA_LAUKS = {
     "Platība ha": "platiba_ha", "Krāja m³/ha": "kraja_m3_ha", "Bonitāte": "bonitate",
     "Vecums": "vecums", "Kailcirte": "kailcirte", "Apjoms m³": "apjoms_m3",
 }
+# Kailcirte kā izvēle (nevis ķeksis), lai "Jā" būtu redzams ar zaļo ✅
+KAILCIRTE_JA, KAILCIRTE_NE = "✅ Jā", "— Nē"
 
 
 def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
@@ -50,6 +54,8 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
                 continue
             if isinstance(vertiba, float) and vertiba != vertiba:  # NaN = dzēsta šūna
                 vertiba = None
+            if lauks == "kailcirte" and vertiba is not None:
+                vertiba = vertiba == KAILCIRTE_JA
             setattr(lab, lauks, vertiba)  # None -> atpakaļ uz PDF vērtību
             if lauks in ("platiba_ha", "kraja_m3_ha"):
                 lab.apjoms_m3 = None  # apjoms jāpārrēķina no jaunās platības/krājas
@@ -137,11 +143,6 @@ if riski:
     )
 
 st.subheader("Nogabalu vērtējums")
-st.caption(
-    "✏️ Rediģējamas kolonnas: **Platība, Krāja, Bonitāte, Vecums, Kailcirte, Apjoms** — "
-    "pēc labojuma viss pārrēķinās. Platības/krājas labojums pārrēķina apjomu; "
-    "bonitātes/vecuma labojums pārvērtē kailcirti; dzēsta šūna atjauno PDF vērtību."
-)
 
 rindas, atslegas = [], []
 for v in vertejumi:
@@ -156,7 +157,7 @@ for v in vertejumi:
         "Bonitāte": n.bonitate,
         "Vecums": n.vecums,
         "Valdošā suga": SUGU_NOSAUKUMI.get(v.valdosa_suga, v.valdosa_suga),
-        "Kailcirte": v.atlauta_kailcirte,
+        "Kailcirte": KAILCIRTE_JA if v.atlauta_kailcirte else KAILCIRTE_NE,
         "Apjoms m³": apjoms,
         "Karogi": karogi,
     }
@@ -176,13 +177,24 @@ st.data_editor(
     use_container_width=True,
     disabled=["Nog.", "Formula", "Valdošā suga", "Karogi", "Info no PDF", "Pamatojums"],
     column_config={
-        "Platība ha": st.column_config.NumberColumn(min_value=0.0, step=0.01, format="%.2f"),
-        "Krāja m³/ha": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.0f"),
-        "Bonitāte": st.column_config.SelectboxColumn(options=BONITATES),
-        "Vecums": st.column_config.NumberColumn(min_value=0, max_value=300, step=1, format="%d"),
-        "Kailcirte": st.column_config.CheckboxColumn(help="Ieķeksē/izķeksē, lai iekļautu vai izslēgtu nogabalu"),
-        "Apjoms m³": st.column_config.NumberColumn(min_value=0.0, step=0.01, format="%.2f",
-                                                   help="Manuāli ievadīts apjoms aizstāj aprēķināto"),
+        "Platība ha": st.column_config.NumberColumn(
+            min_value=0.0, step=0.01, format="%.2f",
+            help="Mainot pārrēķinās apjoms. Notīri šūnu, lai atjaunotu PDF vērtību."),
+        "Krāja m³/ha": st.column_config.NumberColumn(
+            min_value=0.0, step=1.0, format="%.0f",
+            help="Mainot pārrēķinās apjoms. Notīri šūnu, lai atjaunotu PDF vērtību."),
+        "Bonitāte": st.column_config.SelectboxColumn(
+            options=BONITATES,
+            help="Mainot pārvērtē kailcirtes atbilstību. Notīri šūnu, lai atjaunotu PDF vērtību."),
+        "Vecums": st.column_config.NumberColumn(
+            min_value=0, max_value=300, step=1, format="%d",
+            help="Mainot pārvērtē kailcirtes atbilstību. Notīri šūnu, lai atjaunotu PDF vērtību."),
+        "Kailcirte": st.column_config.SelectboxColumn(
+            options=[KAILCIRTE_JA, KAILCIRTE_NE], width="small",
+            help="Manuāli iekļauj vai izslēdz nogabalu no cirsmas. Notīri šūnu, lai atjaunotu sistēmas lēmumu."),
+        "Apjoms m³": st.column_config.NumberColumn(
+            min_value=0.0, step=0.01, format="%.2f",
+            help="Manuāli ievadīts apjoms aizstāj aprēķināto. Notīri šūnu, lai atjaunotu aprēķināto."),
         "Karogi": st.column_config.TextColumn(help="✎ manuāli labots · ⚠ risks · ℹ informācija",
                                               width="small"),
         "Info no PDF": st.column_config.TextColumn(width="large"),
@@ -192,7 +204,13 @@ st.data_editor(
 
 if labojumi:
     l1, l2 = st.columns([3, 1])
-    l1.info(f"✎ Manuāli laboti {len(laboti)} nogabali — aprēķins un atskaites ņem vērā labojumus.")
+    izmainas = labojumu_izmainas(inv.nogabali, labojumi)
+    atsifrejums = "\n".join(
+        f"- **{nog_nosaukums(inv, inv.nogabali[i])}** — " + "; ".join(r)
+        for i, r in sorted(izmainas.items())
+    )
+    l1.info(f"✎ Manuāli laboti {len(izmainas)} nogabali — aprēķins un atskaites ņem vērā labojumus."
+            + (f"\n\n{atsifrejums}" if atsifrejums else ""))
     if l2.button("↺ Atiestatīt visus labojumus", use_container_width=True):
         st.session_state.labojumi = {}
         st.session_state.tabulas_versija += 1
@@ -207,7 +225,7 @@ if ar_info:
             n = v.nogabals
             st.markdown(f"**{nog_nosaukums(inv, n)}** "
                         f"({'cērtams' if v.atlauta_kailcirte else 'necērtams'}, {n.formula})")
-            punkti = [f"📄 {r}" for r in (n.pdf_apraksts if gabali else [])] + v.bridinajumi
+            punkti = list(n.pdf_apraksts if gabali else []) + v.bridinajumi
             st.markdown("\n".join(f"- {p}" for p in punkti))
 
 kol1, kol2 = st.columns(2)

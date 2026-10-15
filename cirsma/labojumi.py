@@ -104,3 +104,60 @@ def novertet_ar_labojumiem(
                 riska_karogi(k, v.atlauta_kailcirte)
         rezultati.append(v)
     return rezultati
+
+
+def _fmt(lauks: str, vertiba) -> str:
+    if vertiba is None:
+        return "—"
+    if lauks == "kailcirte":
+        return "jā" if vertiba else "nē"
+    if lauks == "platiba_ha":
+        return f"{float(vertiba):.2f} ha"
+    if lauks == "kraja_m3_ha":
+        return f"{float(vertiba):.0f} m³/ha"
+    if lauks == "apjoms_m3":
+        return f"{float(vertiba):.2f} m³"
+    if lauks == "vecums":
+        return str(int(vertiba))
+    return str(vertiba)
+
+
+def labojumu_izmainas(
+    nogabali: list[Nogabals], labojumi: dict[str, Labojums] | None,
+) -> dict[int, list[str]]:
+    """Katram labotajam nogabalam — saraksts ar lietotāja izmaiņām "Lauks: vecā → jaunā".
+
+    Uzskaita tikai lietotāja ievadītās vērtības (automātiski pārrēķinātais apjoms
+    vai kailcirtes lēmums netiek rādīts kā atsevišķs labojums).
+    """
+    from .sortiment import vertejuma_apjoms  # sortiment neimportē labojumi — cikla nav
+
+    labojumi = labojumi or {}
+    bazes = {v.indekss: v for v in novertet_ar_labojumiem(nogabali, {})}
+    galigie = {v.indekss: v for v in novertet_ar_labojumiem(nogabali, labojumi)}
+    rezultats: dict[int, list[str]] = {}
+    for i, n in enumerate(nogabali):
+        lab = labojumi.get(nogabala_atslega(i))
+        if lab is None or lab.tukss() or i not in galigie:
+            continue
+        rindas = []
+        for lauks in ("platiba_ha", "kraja_m3_ha", "bonitate", "vecums", "kailcirte", "apjoms_m3"):
+            jauna = getattr(lab, lauks)
+            if jauna is None:
+                continue
+            if lauks == "kailcirte":
+                v = galigie[i]
+                if not v.pamatojums.startswith("✎"):  # sakrīt ar sistēmas lēmumu
+                    continue
+                veca = not jauna
+            elif lauks == "apjoms_m3":
+                veca = vertejuma_apjoms(bazes[i])[0] if i in bazes else None
+            else:
+                veca = getattr(n, lauks)
+            if _fmt(lauks, veca) == _fmt(lauks, jauna):
+                continue
+            rindas.append(f"{LAUKU_NOSAUKUMI[lauks].capitalize()}: "
+                          f"{_fmt(lauks, veca)} → {_fmt(lauks, jauna)}")
+        if rindas:
+            rezultats[i] = rindas
+    return rezultats
