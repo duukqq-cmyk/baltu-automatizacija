@@ -67,7 +67,7 @@ def teksta_atskaite(inv: Inventarizacija, vertejumi: list[Vertejums], fin: Finan
         for b in v.bridinajumi:
             rindas.append(f"      {b}")
         for r in _pdf_info(inv, n):
-            rindas.append(f"      📄 {r}")
+            rindas.append(f"      • {r}")
     rindas += ["", "Kailcirtei NEatbilstošie nogabali:"]
     for v in necirt:
         rindas.append(f"  {nog_nosaukums(inv, v.nogabals)} | {v.pamatojums}")
@@ -75,7 +75,7 @@ def teksta_atskaite(inv: Inventarizacija, vertejumi: list[Vertejums], fin: Finan
             if b.startswith("✎"):
                 rindas.append(f"      {b}")
         for r in _pdf_info(inv, v.nogabals):
-            rindas.append(f"      📄 {r}")
+            rindas.append(f"      • {r}")
 
     riski = [v for v in cirt if any(b.startswith("⚠") for b in v.bridinajumi)]
     if riski:
