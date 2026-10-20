@@ -4,7 +4,7 @@ import streamlit as st
 st.title("⚙️ Procesu automatizācijas platforma")
 st.caption("Izvēlies, kuru funkciju vēlies izmantot.")
 
-c1, c2 = st.columns(2, gap="large")
+c1, c2, c3 = st.columns(3, gap="large")
 
 with c1:
     with st.container(border=True):
@@ -29,6 +29,18 @@ with c2:
         st.write("**Rezultāts:** datu tabula, Excel fails un e-pasta kopsavilkums.")
         if st.button("Atvērt →", key="uz_ligumiem", type="primary", use_container_width=True):
             st.switch_page("views/ligumi.py")
+
+with c3:
+    with st.container(border=True):
+        st.subheader("📊 Atskaites")
+        st.write(
+            "Savāc datus no iepirkumu agentu monday.com boardiem, apvieno rindas leados "
+            "(1 īpašuma kadastra Nr. = 1 lead) un aprēķina leadu, kvalifikācijas, "
+            "priekšvērtējumu, apsekošanas, pirkumu un atteikumu metrikus."
+        )
+        st.write("**Rezultāts:** metriki ekrānā, pa agentiem, Excel un teksta atskaite.")
+        if st.button("Atvērt →", key="uz_atskaitem", type="primary", use_container_width=True):
+            st.switch_page("views/atskaites.py")
 
 st.divider()
 st.caption(

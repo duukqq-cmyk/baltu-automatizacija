@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# monday API tokens un uzņēmuma boardu konfigurācija — nekad repozitorijā (repo ir publisks)
+.streamlit/secrets.toml
+dati/monday_konfiguracija.json

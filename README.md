@@ -1,6 +1,6 @@
 # ⚙️ Procesu automatizācijas platforma (Baltu Investments atlases uzdevumi)
 
-Viena Streamlit lietotne ar sākuma izvēlni un diviem moduļiem:
+Viena Streamlit lietotne ar sākuma izvēlni un trim moduļiem:
 
 1. **🌲 Meža inventarizācijas analīze** (1. uzdevums, obligātais) —
    inventarizācijas PDF → kailcirtes atlase → apjomi pa sugām → sortimentu
@@ -114,6 +114,45 @@ platību sadalījums, pēdējā cirte, plānotā darbība u.c.
 - Kļūdu apstrāde: tukšs/skenēts PDF → skaidrs brīdinājums; neatrasts lauks →
   ⚠ piezīme, nevis kluss izlaidums; reģ. nr. garuma kontrole; summas konteksta
   pārbaude ("pirkuma maksa"/"nomas maksa" vs vienkārši lielākais skaitlis).
+
+## 3. modulis: 📊 Atskaites (leadu metriki no monday.com)
+
+Savāc datus no iepirkumu agentu monday boardiem caur monday GraphQL API un aprēķina
+CEO metrikus (dokuments *Monday_metrics*).
+
+```
+monday API ──► atskaites/monday.py ──► modelis.py ──────────────► metrikas.py ──► eksports.py
+(boardi,       (lapošana, limiti,      (kolonnu karte, rindas      (periods,        (Excel 6 lapas,
+ rindas)        kļūdas)                 → leadi pēc kadastra Nr.)   definīcijas)     teksts)
+```
+
+**Lead definīcija:** 1 lead = 1 **īpašuma** kadastra Nr. Visas zemes vienības (monday rindas)
+vienā īpašumā = 1 lead, platība un m³ summējas. Viens īpašnieks ar 2 īpašumiem = 2 leadi;
+2 īpašnieki vienam īpašumam = 1 lead. Rinda bez īpašuma Nr. tiek piesaistīta īpašumam pēc
+zemes vienības apz. vai tālruņa (ja viennozīmīgi); citādi kļūst par atsevišķu leadu un
+nonāk sadaļā "Datu kvalitāte". **Atjaunots** = tas pats īpašums atkal pēc >365 dienām.
+
+**Metriki** (katrs notikums periodā pēc sava datuma): leadi kopā / unikāli / atjaunoti /
+kvalitatīvi / mērķa / proaktīvi; kvalificēti + vid. laiks; priekšvērtējumi + laiks +
+dienā/nedēļā/mēnesī; tikšanās; apsekoti + laiks līdz gala piedāvājumam; nopirkti
+(gab., m³, ha, EUR, cenas samazinājums pret maks. gala piedāvājumu); atteikti + iemesli.
+Papildus: sadalījums pa agentiem, piltuve tagad (pēc grupām), leadu tabula.
+
+**Kolonnas** tiek atpazītas automātiski pēc nosaukuma (sk. `LAUKI` failā `atskaites/modelis.py`);
+sasaisti un grupu nozīmi var mainīt cilnē *Iestatījumi* (saglabājas
+`dati/monday_konfiguracija.json`, nav repozitorijā). Ja boardā kolonnas nav, metriks netiek
+izdomāts — tas paliek "—" ar piezīmi; trūkstošās kolonnas var izveidot boardā no cilnes
+*Iestatījumi → Board standarts*.
+
+```bash
+# Tokens: monday → profila bilde → Developers → My access tokens
+# Web: ieliec .streamlit/secrets.toml rindu  MONDAY_API_TOKEN = "..."  (vai ievadi sānjoslā)
+export MONDAY_API_TOKEN=...
+python scripts/monday_atskaite.py --menesis 2026-10 --excel oktobris.xlsx   # ieplānojams ar cron
+python scripts/monday_atskaite.py --demo                                     # bez API
+```
+
+Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
 
 ## Verifikācija pret pamācības piemēru
 
