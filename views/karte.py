@@ -9,6 +9,8 @@ import re
 import tempfile
 
 import folium
+import shapely
+from shapely.geometry import mapping
 import pandas as pd
 import streamlit as st
 from branca.element import MacroElement, Template
@@ -62,23 +64,59 @@ def _mainits(pietuvinat: bool = False) -> None:
         ss.karte_pietuvinat = ss.karte_pietuvinat_html = True
 
 
+@st.cache_data(ttl=12 * 3600, show_spinner="Ielādē nogabalu datus (Meža valsts reģistrs)…")
+def _mvr_teritorija(prefikss: str) -> bytes | None:
+    return lejupieladet_teritoriju(prefikss)
+
+
+def _mvr_nogabali(kadastrs: str):
+    try:
+        return nogabali_no_faila(_mvr_teritorija(kadastrs[:4]), kadastrs), None
+    except MvrKluda as e:
+        return None, str(e)
+
+
+def _zv_no_mvr(kadastrs: str) -> dict | None:
+    """Rezerves variants, ja VZD serviss nav sasniedzams: zemes vienības meža daļa no MVR."""
+    df, _ = _mvr_nogabali(kadastrs)
+    if df is None or df.empty:
+        return None
+    g = shapely.union_all([shapely.from_wkb(b) for b in df["geom"]])
+    geom = mapping(g)
+    return {"kadastrs": kadastrs, "platiba_ha": None, "platiba_graf_ha": mervienibas(geom)["platiba_ha"],
+            "geometry": geom, "saite": f"https://www.kadastrs.lv/parcels/search?cad_num={kadastrs}",
+            "tikai_mezs": True}
+
+
 def _meklet_kadastru(kodi: list[str] | None = None) -> None:
     """Atrod zemes vienības VZD servisā, parāda kartē un ieslēdz nogabalu slāni."""
     kodi = kodi if kodi is not None else apzimejumi(ss.get("karte_kad_ievade", ""))
     if not kodi:
         ss.karte_zv_zina = ("error", "Ievadi 11 ciparu kadastra apzīmējumu, piem., 80640010066.")
         return
+    vzd_kluda = None
     try:
-        atrasti = atrast(kodi)
+        atrasti = atrast(kodi, timeout=8)
     except KadastrsKluda as e:
-        ss.karte_zv_zina = ("error", str(e))
+        atrasti, vzd_kluda = [], e
+    # Ko VZD neatrada (vai serviss nav pieejams) — meklē Meža valsts reģistrā
+    for k in [k for k in kodi if k not in {z["kadastrs"] for z in atrasti}]:
+        z = _zv_no_mvr(k)
+        if z:
+            atrasti.append(z)
+    if vzd_kluda and not atrasti:
+        ss.karte_zv_zina = ("error", f"Zemes vienība nav atrasta: VZD kadastra serviss nav pieejams, "
+                                     f"un Meža valsts reģistrā šim apzīmējumam nav nogabalu.")
         return
     esosie = {z["kadastrs"] for z in ss.karte_zv}
     ss.karte_zv = ss.karte_zv + [z for z in atrasti if z["kadastrs"] not in esosie]
     neatrasti = [k for k in kodi if k not in {z["kadastrs"] for z in atrasti}]
     ss.karte_zv_zina = (("warning", "Nav atrasta zemes vienība: " + ", ".join(neatrasti)
                          + ". Ja tas ir īpašuma numurs, kadastrs.lv apskaties tā zemes vienību apzīmējumus.")
-                        if neatrasti else None)
+                        if neatrasti else
+                        ("info", "VZD kadastra serviss šobrīd nav sasniedzams — rādīta zemes vienības meža "
+                                 "daļa pēc Meža valsts reģistra nogabaliem (bez precīzas kadastra robežas).")
+                        if any(z.get("tikai_mezs") for z in atrasti) else None)
     if atrasti:
         ss.karte_ieslegt_nogabalus = True      # slāni ieslēdz nākamajā pārlādē (pirms logrīka)
         ss.karte_fokuss = [z["kadastrs"] for z in atrasti]
@@ -112,9 +150,14 @@ if ss.karte_zv_zina:
     getattr(st.sidebar, ss.karte_zv_zina[0])(ss.karte_zv_zina[1])
 for z in ss.karte_zv:
     with st.sidebar.container(border=True):
-        st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · {z['platiba_ha'] or 0:.2f} ha",
-                    help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
-                         f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
+        if z.get("tikai_mezs"):
+            st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · mežs {z['platiba_graf_ha']:.2f} ha",
+                        help="Robeža = Meža valsts reģistra nogabalu apvienojums (VZD serviss nebija "
+                             "pieejams). Saite atver kadastrs.lv.")
+        else:
+            st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · {z['platiba_ha'] or 0:.2f} ha",
+                        help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
+                             f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
         b, c = st.columns(2)
         b.button("Kā objekts", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
                  args=(z["kadastrs"],), use_container_width=True,
@@ -197,18 +240,6 @@ def _nolasit_pdf(pdf_baiti: bytes):
         with open(cels, "wb") as f:
             f.write(pdf_baiti)
     return parse_inventory_pdf(cels)
-
-
-@st.cache_data(ttl=12 * 3600, show_spinner="Ielādē nogabalu datus (Meža valsts reģistrs)…")
-def _mvr_teritorija(prefikss: str) -> bytes | None:
-    return lejupieladet_teritoriju(prefikss)
-
-
-def _mvr_nogabali(kadastrs: str):
-    try:
-        return nogabali_no_faila(_mvr_teritorija(kadastrs[:4]), kadastrs), None
-    except MvrKluda as e:
-        return None, str(e)
 
 
 inv_pdf, pdf_kluda = None, None
