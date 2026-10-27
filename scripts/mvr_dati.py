@@ -36,7 +36,7 @@ LAUKI = [
 ]
 
 
-UA = {"User-Agent": "Mozilla/5.0 (baltu-automatizacija MVR datu sagatavošana)"}
+UA = {"User-Agent": "Mozilla/5.0 (baltu-automatizacija MVR data prep)"}
 
 
 def _atvert(url: str, timeout: float):
