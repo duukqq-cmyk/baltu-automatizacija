@@ -36,6 +36,7 @@ from karte.parrekins import (
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
 LATVIJA = {"center": [56.95, 24.6], "zoom": 8}
+AKCENTS = "#ff4b4b"      # aplikācijas pogu krāsa — līnijām un virsotnēm kartē
 
 ss = st.session_state
 ss.setdefault("karte_objekti", [])
@@ -288,7 +289,7 @@ _OBJEKTI_JS = Template("""
     var fc = {{ this.dati }};
     var fg = {{ this.fg_el.get_name() }};
     L.geoJSON(fc, {
-        style: function(f) { return {color: f.properties.krasa, weight: 2.5,
+        style: function(f) { return {color: f.properties.krasa, weight: 3.5,
                                      fillColor: f.properties.krasa, fillOpacity: 0.25}; },
         pointToLayer: function(f, latlng) { return L.marker(latlng); },
         onEachFeature: function(f, layer) {
@@ -321,7 +322,7 @@ _OBJEKTI_JS = Template("""
             gredzeni(l.getLatLngs()).forEach(function(r) {
                 var n = r.length;
                 for (var i = 0; i < n; i++) {
-                    L.circleMarker(r[i], {radius: 4, color: "#fff", weight: 1.5, fillColor: "#f97316",
+                    L.circleMarker(r[i], {radius: 5, color: "#fff", weight: 2, fillColor: "#ff4b4b",
                                           fillOpacity: 1, interactive: false}).addTo(garumi);
                     if (!slegts && i === n - 1) break;
                     var a = r[i], b = r[(i + 1) % n], d = karte.distance(a, b);
@@ -381,7 +382,7 @@ if (window.L && L.drawLocal) {
   d.handlers.polygon.tooltip.end = "Klikšķini uz pirmā punkta, lai noslēgtu";
   d.handlers.polyline.tooltip.start = "Klikšķini, lai sāktu līniju";
   d.handlers.polyline.tooltip.cont = "Klikšķini, lai turpinātu";
-  d.handlers.polyline.tooltip.end = "Klikšķini uz pēdējā punkta, lai pabeigtu";
+  d.handlers.polyline.tooltip.end = "Klikšķini uz pēdējā punkta, lai pabeigtu, vai uz pirmā — lai noslēgtu laukumu";
   d.handlers.polyline.error = "<strong>Kļūda:</strong> malas nedrīkst krustoties!";
   d.handlers.rectangle.tooltip.start = "Klikšķini un velc taisnstūri";
   d.handlers.marker.tooltip.start = "Klikšķini kartē, lai atzīmētu punktu";
@@ -395,6 +396,41 @@ if (window.L && L.drawLocal) {
   e.handlers.edit.tooltip.text = "Velc virsotnes, lai labotu robežu";
   e.handlers.edit.tooltip.subtext = "Spied Atcelt, lai atsauktu izmaiņas";
   e.handlers.remove.tooltip.text = "Klikšķini uz objekta, lai to dzēstu";
+
+  // Līnijas rīks: klikšķis atpakaļ uz pirmā punkta noslēdz figūru -> laukums (kā LVM GEO)
+  if (!L.Draw.Polyline.prototype._aizversanaIelikta) {
+    L.Draw.Polyline.prototype._aizversanaIelikta = true;
+    var pievienot = L.Draw.Polyline.prototype.addVertex;
+    L.Draw.Polyline.prototype.addVertex = function(latlng) {
+      if (this.type === "polyline" && this._markers && this._markers.length >= 3) {
+        var a = this._map.latLngToLayerPoint(this._markers[0].getLatLng());
+        var b = this._map.latLngToLayerPoint(latlng);
+        if (a.distanceTo(b) < 14) { this._aizvert = true; this.completeShape(); return; }
+      }
+      return pievienot.call(this, latlng);
+    };
+    // Klikšķis tieši uz pirmā punkta (marķieris pārtver klikšķi, addVertex netiek izsaukts)
+    var finisaApstr = L.Draw.Polyline.prototype._updateFinishHandler;
+    L.Draw.Polyline.prototype._updateFinishHandler = function() {
+      finisaApstr.call(this);
+      if (this.type === "polyline" && this._markers && this._markers.length >= 3) {
+        if (!this._aizvertKlik) {
+          this._aizvertKlik = function() { this._aizvert = true; this.completeShape(); };
+        }
+        this._markers[0].off("click", this._aizvertKlik, this).on("click", this._aizvertKlik, this);
+      }
+    };
+    var izveidot = L.Draw.Polyline.prototype._fireCreatedEvent;
+    L.Draw.Polyline.prototype._fireCreatedEvent = function() {
+      if (this.type === "polyline" && this._aizvert) {
+        this._aizvert = false;
+        var laukums = new L.Polygon(this._poly.getLatLngs(), L.extend({}, this.options.shapeOptions, {fill: true}));
+        L.Draw.Feature.prototype._fireCreatedEvent.call(this, laukums);
+        return;
+      }
+      return izveidot.call(this);
+    };
+  }
 }
 {% endmacro %}
 """)
@@ -405,6 +441,10 @@ _STILS = """
   font: 600 11px/1.2 system-ui, sans-serif; padding: 1px 4px; color: #111;}
 .karte-etikete:before {display: none;}
 .leaflet-draw-tooltip {font-size: 12px;}
+.leaflet-editing-icon, .karte-virsotne {border-radius: 50% !important; background: #ff4b4b !important;
+  border: 2px solid #fff !important; box-shadow: 0 0 0 1px rgba(0,0,0,.35);}
+.leaflet-editing-icon.leaflet-middle-icon {opacity: .55 !important;}
+.leaflet-draw-guide-dash {background-color: #ff4b4b !important; border-radius: 50%;}
 .seg-garums span {background: rgba(17,24,39,.82); color: #fff; font: 600 11px/1 system-ui, sans-serif;
   padding: 2px 4px; border-radius: 3px; white-space: nowrap; transform: translate(-50%, -50%);
   display: inline-block;}
@@ -528,10 +568,11 @@ def uzbuvet_karti() -> folium.Map:
         draw_options={
             "polygon": {"allowIntersection": False, "showArea": True, "metric": ["ha", "m"],
                         "precision": {"ha": 2, "m": 0},
-                        "shapeOptions": {"color": STATUSI["Kailcirte"], "weight": 2.5}},
-            "polyline": {"metric": True, "shapeOptions": {"color": STATUSI["Krautuve / ceļš"]}},
+                        "shapeOptions": {"color": AKCENTS, "weight": 3.5, "opacity": 1}},
+            "polyline": {"metric": True,
+                         "shapeOptions": {"color": AKCENTS, "weight": 3.5, "opacity": 1}},
             "rectangle": {"showArea": True, "metric": ["ha", "m"],
-                          "shapeOptions": {"color": STATUSI["Kailcirte"], "weight": 2.5}},
+                          "shapeOptions": {"color": AKCENTS, "weight": 3.5, "opacity": 1}},
             "circle": False, "circlemarker": False, "marker": True,
         },
         # "edit": True (bool) Leaflet.draw 1.0.x nesaprot -> virsotnes netiek rādītas; jādod objekts
@@ -542,7 +583,7 @@ def uzbuvet_karti() -> folium.Map:
     plugins.MeasureControl(position="topleft", primary_length_unit="meters",
                            secondary_length_unit="kilometers", primary_area_unit="hectares",
                            secondary_area_unit="sqmeters", localization="en",
-                           active_color="#e5484d", completed_color="#e5484d").add_to(m)
+                           active_color=AKCENTS, completed_color=AKCENTS).add_to(m)
     plugins.Fullscreen(position="topright", title="Pilnekrāns", title_cancel="Iziet").add_to(m)
     plugins.LocateControl(position="topright", strings={"title": "Mana atrašanās vieta"},
                           flyTo=True, keepCurrentZoomLevel=False).add_to(m)

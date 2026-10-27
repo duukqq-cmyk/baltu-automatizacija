@@ -22,7 +22,7 @@ from shapely.ops import unary_union
 from shapely.validation import make_valid
 
 STATUSI: dict[str, str] = {          # statuss -> krāsa kartē
-    "Kailcirte": "#e5484d",
+    "Kailcirte": "#ff4b4b",      # tāda pati kā aplikācijas pogas
     "Kopšanas cirte": "#f59e0b",
     "Izlases cirte": "#a855f7",
     "Krautuve / ceļš": "#3b82f6",
