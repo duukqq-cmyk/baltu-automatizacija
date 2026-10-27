@@ -154,6 +154,27 @@ python scripts/monday_atskaite.py --demo                                     # b
 
 Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
 
+## 4. modulis: 🗺️ Karte (beta) — cirsmu atzīmēšana, mērījumi un pārrēķins
+
+`views/karte.py`, loģika `karte/`:
+
+- **Slāņi** (`karte/slani.py`) — LVM GEO brīvpieejas WMS (Fees/AccessConstraints = NONE), EPSG:3857:
+  pamatkartes — ortofoto (jaunākais 7./8. cikls), infrasarkanais ortofoto, Sentinel-2 pēdējais
+  bezmākoņu attēls, topokarte 1:10 000, OSM; pārklājumi — LiDAR veģetācijas augstuma modelis
+  (arī izlīdzināts), VMD mežaudžu plāns (nogabali), kadastra karte, vējgāzes pēc 2026.08.22. vētras,
+  LVM meža ceļi/grāvji, augsnes, horizontāles.
+- **Zīmēšana un mērījumi** — laukumi, līnijas, taisnstūri, punkti (Leaflet.draw, latviski), robežu
+  labošana un dzēšana, ātrais mērīšanas rīks, GPS atrašanās vieta, pāreja uz WGS84 / LKS-92 koordinātām.
+  Platības un garumi tiek rēķināti **LKS-92 / TM (EPSG:3059)**; pārklāšanās tiek atzīmēta.
+- **Imports / eksports** — KML (arī tīmekļa karšu zīmēšanas rīku `ExtendedData COLOR`) un GeoJSON;
+  importēto krāsu nozīmi var piešķirt statusam ar vienu klikšķi. Eksports: KML, GeoJSON, Excel.
+- **Pārrēķins** (`karte/parrekins.py`) — kailcirtes laukumu piesaista inventarizācijas nogabalam;
+  nogabala platība = piesaistīto laukumu summa, apjoms = krāja × platība, un iegādes summa pārrēķinās
+  ar tiem pašiem moduļiem kā Meža inventarizācijas sadaļā. Rezultātu var lejupielādēt Excel atskaitē
+  vai pārnest kā labojumus uz Meža inventarizācijas sadaļu (tas pats PDF ir kopīgs abām sadaļām).
+- **Ierobežojumi (beta)** — objekti glabājas pārlūka sesijā (saglabāšanai — KML eksports); nogabalu
+  ģeometrija no WMS nav nolasāma, tāpēc laukums nogabalam tiek piesaistīts manuāli.
+
 ## Verifikācija pret pamācības piemēru
 
 | Rādītājs | Pamācībā | Sistēmas rezultāts |

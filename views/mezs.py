@@ -98,11 +98,16 @@ pelna = st.sidebar.slider("Peļņas rezerve, %", 0, 50, int(NOKLUSEJUMA_PELNAS_R
 
 # --- PDF augšupielāde ------------------------------------------------------
 fails = st.file_uploader("Meža inventarizācijas PDF", type="pdf")
-if not fails:
+if fails:
+    # Kopīgs ar Kartes sadaļu — tur var piesaistīt kartes laukumus šī PDF nogabaliem
+    st.session_state.inv_pdf = {"baiti": fails.getvalue(), "nosaukums": fails.name}
+elif st.session_state.get("inv_pdf"):
+    st.caption(f"Izmanto iepriekš ielādēto failu: **{st.session_state.inv_pdf['nosaukums']}**")
+else:
     st.info("⬆️ Augšupielādē PDF failu, lai sāktu (paraugs: `dati/Nogabalu_raksturojosie_raditaji_64560020029.pdf`).")
     st.stop()
 
-pdf_baiti = fails.getvalue()
+pdf_baiti = st.session_state.inv_pdf["baiti"]
 cels = _saglabat_pdf(pdf_baiti)
 
 try:

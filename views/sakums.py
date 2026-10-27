@@ -42,6 +42,17 @@ with c3:
         if st.button("Atvērt →", key="uz_atskaitem", type="primary", use_container_width=True):
             st.switch_page("views/atskaites.py")
 
+with st.container(border=True):
+    k1, k2 = st.columns([4, 1], vertical_alignment="center")
+    k1.subheader("🗺️ Karte (beta)")
+    k1.write(
+        "Ortofoto, LiDAR veģetācijas augstums, VMD mežaudžu plāns un kadastra karte vienā kartē. "
+        "Zīmē un mēri cirsmas, importē KML, piesaisti laukumus nogabaliem — apjoms un iegādes "
+        "summa pārrēķinās pēc uzmērītajām platībām."
+    )
+    if k2.button("Atvērt →", key="uz_karti", type="primary", use_container_width=True):
+        st.switch_page("views/karte.py")
+
 st.divider()
 st.caption(
     "Prototips izstrādāts SIA Baltu Investments atlases uzdevumam · "
