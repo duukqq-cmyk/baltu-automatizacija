@@ -1,0 +1,26 @@
+name: MVR datu izpēte (pagaidu)
+on:
+  push:
+    branches: [mvr-dati]
+    paths: [".github/workflows/mvr-izpete.yml", "scripts/mvr_izpete.py"]
+permissions:
+  contents: write
+jobs:
+  izpete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pyogrio pandas
+      - run: |
+          curl -sSL -o centra.7z "https://data.gov.lv/dati/dataset/40014c0a-90f5-42be-afb2-fe3c4b8adf92/resource/392dfb67-eeeb-43c2-b082-35f9cf986128/download/centra.7z"
+          ls -la centra.7z
+          7z x -y -ocentra centra.7z > /dev/null
+          find centra -type f | head -50 > faili.txt
+          du -sh centra >> faili.txt
+      - run: python scripts/mvr_izpete.py centra > izpete.md 2>&1 || true
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat faili.txt izpete.md > body.md
+          gh release delete mvr-izpete -y --cleanup-tag || true
+          gh release create mvr-izpete --prerelease --title "MVR izpēte" --notes-file body.md --target ${{ github.sha }}
