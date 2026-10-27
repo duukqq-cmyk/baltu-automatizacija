@@ -22,6 +22,59 @@ def nog_nosaukums(inv: Inventarizacija, n) -> str:
     return f"{n.apzimejums}.nog" if inv.vairaki_kvartali else f"{n.nr}.nog"
 
 
+NAV_MEZAUDZE = "Nav mežaudze"
+NECERTAMS = "Netiek cirsts"
+KAILCIRTE = "Kailcirte"
+
+
+def _vmd_cirtes_veids(planots: str | None) -> str | None:
+    """'Koku ciršana 2026, Kailcirte' -> 'Kailcirte'."""
+    if not planots:
+        return None
+    veids = planots.rsplit(",", 1)[-1].strip()
+    return veids[:1].upper() + veids[1:] if veids else None
+
+
+def platiba_pa_cirtes_veidiem(inv: Inventarizacija, vertejumi: list[Vertejums]) -> list[dict]:
+    """Platības kopsavilkums pēc cirtes veida.
+
+    Kailcirte — nogabali, kas atbilst kailcirtei (aprēķinā iekļautie).
+    Pārējām mežaudzēm — VMD plānotās cirtes veids (ja avotā norādīts),
+    citādi "Netiek cirsts". Zeme, kas nav mežaudze, — atsevišķā rindā.
+    Atgriež rindas {"Cirtes veids", "Nogabali", "Platība ha", "Daļa"} + "Kopā".
+    """
+    grupas: dict[str, list] = {}
+    indeksi = {v.indekss for v in vertejumi}
+    objekti = {id(v.nogabals) for v in vertejumi}
+    for v in vertejumi:
+        if v.atlauta_kailcirte:
+            veids = KAILCIRTE
+        else:
+            veids = _vmd_cirtes_veids(v.nogabals.planots)
+            veids = f"{veids} (VMD plānots)" if veids else NECERTAMS
+        grupas.setdefault(veids, []).append(v.nogabals)
+    for i, n in enumerate(inv.nogabali):
+        if i not in indeksi and id(n) not in objekti:  # nav novērtēts -> nav mežaudze
+            grupas.setdefault(NAV_MEZAUDZE, []).append(n)
+
+    def kartiba(veids: str) -> tuple:
+        return (veids != KAILCIRTE, veids in (NECERTAMS, NAV_MEZAUDZE), veids == NAV_MEZAUDZE, veids)
+
+    kopa = sum(n.platiba_ha or 0 for ng in grupas.values() for n in ng)
+    rindas = []
+    for veids in sorted(grupas, key=kartiba):
+        ha = round(sum(n.platiba_ha or 0 for n in grupas[veids]), 2)
+        rindas.append({
+            "Cirtes veids": veids,
+            "Nogabali": ";".join(nog_nosaukums(inv, n).removesuffix(".nog") for n in grupas[veids]),
+            "Platība ha": ha,
+            "Daļa": ha / kopa if kopa else 0.0,
+        })
+    rindas.append({"Cirtes veids": "Kopā", "Nogabali": "",
+                   "Platība ha": round(kopa, 2), "Daļa": 1.0 if kopa else 0.0})
+    return rindas
+
+
 def atrast_apjomu(fin: FinansuRezultats, n):
     """Nogabala apjoma ieraksts (pēc objekta — nogabalu numuri kvartālos atkārtojas)."""
     return next((a for a in fin.apjomi if a.nogabals is n), None)
@@ -86,6 +139,13 @@ def teksta_atskaite(inv: Inventarizacija, vertejumi: list[Vertejums], fin: Finan
     for s, m3 in fin.pa_sugam_m3.items():
         rindas.append(f"  {SUGU_NOSAUKUMI.get(s, s):14s} {m3:10.2f} m3")
 
+    rindas += ["", "Platība pēc cirtes veidiem:"]
+    platibas = platiba_pa_cirtes_veidiem(inv, vertejumi)
+    platums = max(27, *(len(r["Cirtes veids"]) + 2 for r in platibas))
+    for r in platibas:
+        nog = f"  ({r['Nogabali']})" if r["Nogabali"] else ""
+        rindas.append(f"  {r['Cirtes veids'] + ':':{platums}s}{r['Platība ha']:8.2f} ha {r['Daļa']:6.1%}{nog}")
+
     rindas += [
         "",
         "Finanses:",
@@ -122,6 +182,8 @@ def excel_atskaite(cels: str, inv: Inventarizacija, vertejumi: list[Vertejums], 
          sum(1 for v in cirt if any(b.startswith("⚠") for b in v.bridinajumi))),
         ("Cērtamais apjoms, m3", fin.kopejais_m3),
         *[(f"  t.sk. {SUGU_NOSAUKUMI.get(s, s)} ({s}), m3", m3) for s, m3 in fin.pa_sugam_m3.items()],
+        *[(f"Platība: {r['Cirtes veids']}, ha" if r["Cirtes veids"] != "Kopā" else "Platība kopā, ha",
+           r["Platība ha"]) for r in platiba_pa_cirtes_veidiem(inv, vertejumi)],
         ("Ieņēmumi kopā, EUR", fin.ienemumi_kopa),
         *[(f"Izdevumi: {p}, EUR", -e) for p, e in fin.izdevumi.items()],
         ("Peļņas rezerve, EUR", -fin.pelna),

@@ -70,16 +70,25 @@ st.caption(
 # --- Sānjosla: rediģējamas cenas un izdevumi -------------------------------
 st.sidebar.header("Sortimentu cenas un izdevumi")
 matrica = copy.deepcopy(NOKLUSEJUMA_MATRICA)
-with st.sidebar.expander("Sortimentu cenas (EUR/m3)", expanded=False):
+with st.sidebar.expander("Sortimentu cenas (EUR/m3) un īpatsvari (%)", expanded=False):
     for kolonna, sortimenti in matrica.items():
         st.markdown(f"**{kolonna}**")
         for sortiments, (cena, ipatsvars) in sortimenti.items():
-            jauna = st.number_input(
-                f"{kolonna} · {sortiments} ({ipatsvars:.0%})",
+            k_cena, k_proc = st.columns([3, 2])
+            jauna = k_cena.number_input(
+                f"{kolonna} · {sortiments}",
                 min_value=0.0, value=float(cena), step=1.0,
                 key=f"cena_{kolonna}_{sortiments}",
             )
-            matrica[kolonna][sortiments] = (jauna, ipatsvars)
+            proc = k_proc.number_input(
+                "%", min_value=0.0, max_value=100.0, value=round(ipatsvars * 100, 2),
+                step=1.0, format="%.1f", key=f"ipatsvars_{kolonna}_{sortiments}",
+                help=f"Sortimenta {sortiments} īpatsvars sugas ({kolonna}) apjomā",
+            )
+            matrica[kolonna][sortiments] = (jauna, proc / 100)
+        summa = sum(i for _, i in matrica[kolonna].values())
+        if abs(summa - 1) > 1e-6:
+            st.warning(f"{kolonna}: īpatsvaru summa {summa:.1%} (jābūt 100%)")
 
 izdevumi = {}
 with st.sidebar.expander("Izdevumi (EUR/m3)", expanded=True):

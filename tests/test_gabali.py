@@ -127,3 +127,29 @@ def test_pdf_papildu_info_zem_nogabala():
         assert sum(r.startswith("Platību sadalījums") for r in n.pdf_apraksts) == 1, n.apzimejums
     # VMD avotam šī informācija netiek rādīta
     assert _ielade(VMD).nogabali[0].pdf_apraksts == []
+
+
+def test_platiba_pa_cirtes_veidiem():
+    """Platību summa pa cirtes veidiem = visu nogabalu platība; kailcirte = cērtamie."""
+    import os
+    from cirsma.parser import parse_inventory_pdf
+    from cirsma.labojumi import novertet_ar_labojumiem
+    from cirsma.report import platiba_pa_cirtes_veidiem, teksta_atskaite
+    from cirsma.sortiment import aprekinat
+
+    pdf = os.path.join(os.path.dirname(__file__), "..", "dati", "gabali",
+                       "36560010002_Nogabalu_dati_zv_2.pdf")
+    inv = parse_inventory_pdf(pdf)
+    vertejumi = novertet_ar_labojumiem(inv.nogabali, {})
+    rindas = platiba_pa_cirtes_veidiem(inv, vertejumi)
+    kopa = rindas[-1]
+    assert kopa["Cirtes veids"] == "Kopā"
+    assert kopa["Platība ha"] == round(sum(n.platiba_ha for n in inv.nogabali), 2)
+    assert sum(r["Platība ha"] for r in rindas[:-1]) == pytest.approx(kopa["Platība ha"])
+    assert rindas[0]["Cirtes veids"] == "Kailcirte"
+    assert rindas[0]["Platība ha"] == pytest.approx(
+        sum(v.nogabals.platiba_ha for v in vertejumi if v.atlauta_kailcirte))
+    assert any("(VMD plānots)" in r["Cirtes veids"] for r in rindas)
+
+    t = teksta_atskaite(inv, vertejumi, aprekinat(vertejumi))
+    assert t.index("Apjoms pa sugām:") < t.index("Platība pēc cirtes veidiem:") < t.index("Finanses:")
