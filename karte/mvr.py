@@ -26,10 +26,18 @@ MVR_URL = os.environ.get(
 AVOTS = "MVR (VMD atvērtie dati)"
 
 # --- Klasifikatori (VMD kodi -> teksts kā inventarizācijas PDF) -----------------
-# Bonitāte: kodi pārbaudīti pret VMD inventarizācijas PDF paraugiem.
+# Bonitāte un meža tipi pārbaudīti pret VMD un gabali.lv inventarizācijas PDF paraugiem
+# (64560020029: visi 11 nogabali sakrīt; 42980010013: 12 nogabali sakrīt).
 BONITATE = {"0": "Ia", "1": "I", "2": "II", "3": "III", "4": "IV", "5": "V", "6": "Va"}
 ZEMES_KATEGORIJA = {"10": "Mežaudze"}
-MEZA_TIPS: dict[str, str] = {}
+MEZA_TIPS = {
+    "1": "Sils", "2": "Mētrājs", "3": "Lāns", "4": "Damaksnis", "5": "Vēris", "6": "Gārša",
+    "7": "Grīnis", "8": "Slapjais mētrājs", "9": "Slapjais damaksnis", "10": "Slapjais vēris",
+    "11": "Slapjā gārša", "12": "Purvājs", "14": "Niedrājs", "15": "Dumbrājs", "16": "Liekņa",
+    "17": "Viršu ārenis", "18": "Mētru ārenis", "19": "Šaurlapju ārenis", "21": "Platlapju ārenis",
+    "22": "Viršu kūdrenis", "23": "Mētru kūdrenis", "24": "Šaurlapju kūdrenis",
+    "25": "Platlapju kūdrenis",
+}
 
 
 class MvrKluda(Exception):
@@ -83,7 +91,7 @@ def uz_nogabalu(rinda) -> Nogabals:
     n = Nogabals(
         nr=int(float(rinda["nog"])),
         platiba_ha=float(rinda.get("nog_plat") or 0),
-        zemes_veids=ZEMES_KATEGORIJA.get(zkat, f"Zemes kategorija {zkat}") if zkat else "Nav datu",
+        zemes_veids=ZEMES_KATEGORIJA.get(zkat, f"Cita zeme (kods {zkat})") if zkat else "Nav datu",
         kvartals=_kods(rinda.get("kvart")),
         avots="MVR",
     )
@@ -91,7 +99,8 @@ def uz_nogabalu(rinda) -> Nogabals:
         n.meza_tips = MEZA_TIPS.get(_kods(rinda.get("mt")) or "", _kods(rinda.get("mt")))
         n.formula = (rinda.get("formula") or "").strip() or None
         n.izcelsanas = _kods(rinda.get("izc"))
-        n.bonitate = BONITATE.get(_kods(rinda.get("bon")) or "-")
+        bon = rinda.get("bon")                      # kods "0" = Ia (nevis "nav datu")
+        n.bonitate = BONITATE.get(str(bon).strip().removesuffix(".0")) if bon is not None else None
         n.vid_augstums = _sk(rinda.get("h10"), int)
         n.vid_caurmers = _sk(rinda.get("d10"), int)
         n.vecums = _sk(rinda.get("a10"), int)

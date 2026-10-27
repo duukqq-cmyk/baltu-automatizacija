@@ -244,3 +244,38 @@ def test_cirsma_automatiski_sadalas_pa_nogabaliem():
     s = salidzinat(inv, [cirsma], tikai_atzimetie=True, nogabalu_robezas=rob)
     assert s.pec.kopejais_m3 == pytest.approx(300 * 1.0, rel=0.01)   # 300 m³/ha × (0.6+0.4) ha
     assert s.pirms.kopejais_m3 == pytest.approx(600, rel=0.01)
+
+
+MVR_FIX = os.path.join(os.path.dirname(__file__), "dati", "mvr_64560020029.parquet")
+
+
+@pytest.mark.skipif(not (os.path.exists(MVR_FIX) and os.path.exists(VMD)), reason="Nav paraugu")
+def test_mvr_sakrit_ar_vmd_pdf():
+    """Reālie MVR dati (2026. g. okt.) zemes vienībai 64560020029 = VMD inventarizācijas PDF."""
+    from cirsma.parser import parse_inventory_pdf
+    from cirsma.rules import novertet_nogabalu
+    from cirsma.sortiment import aprekinat
+    from karte.mvr import nogabali_no_faila, robezas, uz_inventarizaciju
+    with open(MVR_FIX, "rb") as f:
+        df = nogabali_no_faila(f.read(), "64560020029")
+    mvr = uz_inventarizaciju("64560020029", df)
+    pdf = parse_inventory_pdf(VMD)
+    pec_apz = {n.apzimejums: n for n in mvr.nogabali}
+    assert set(pec_apz) == {n.apzimejums for n in pdf.nogabali}
+    for p in pdf.nogabali:
+        m = pec_apz[p.apzimejums]
+        assert m.platiba_ha == pytest.approx(p.platiba_ha)
+        if p.ir_mezaudze:
+            assert (m.vecums, m.bonitate, m.vid_augstums, m.vid_caurmers, m.kraja_m3_ha) == \
+                (p.vecums, p.bonitate, p.vid_augstums, p.vid_caurmers, p.kraja_m3_ha)
+            assert m.formula.replace(" ", "") == p.formula.replace(" ", "")
+            assert novertet_nogabalu(m).atlauta_kailcirte == novertet_nogabalu(p).atlauta_kailcirte
+    # Tā pati cirsmas vērtība no reģistra un no PDF
+    from cirsma.rules import atlasit_kailcirtes
+    a = aprekinat(atlasit_kailcirtes(mvr.nogabali))
+    b = aprekinat(atlasit_kailcirtes(pdf.nogabali))
+    assert a.kopejais_m3 == pytest.approx(b.kopejais_m3, abs=1)
+    assert a.max_iegades_summa == pytest.approx(b.max_iegades_summa, abs=20)
+    # Robežu platības atbilst reģistra platībām (±3 %)
+    for apz, g in robezas(df).items():
+        assert mervienibas(g)["platiba_ha"] == pytest.approx(pec_apz[apz].platiba_ha, rel=0.03, abs=0.01)
