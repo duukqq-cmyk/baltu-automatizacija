@@ -1,0 +1,33 @@
+name: MVR nogabalu dati kartei
+# Lejupielādē VMD Meža valsts reģistra atvērtos datus (CC0) un publicē tos kā
+# GitHub Release "mvr-dati" failus mvr_XXXX.parquet (pa kadastra teritorijām).
+on:
+  schedule:
+    - cron: "17 3 20 1,4,7,10 *"     # ceturkšņa atjauninājums (VMD publicē jan/apr/jūl/okt)
+  workflow_dispatch:
+  push:
+    branches: [mvr-dati]
+    paths: [".github/workflows/mvr-dati.yml", "scripts/mvr_dati.py"]
+permissions:
+  contents: write
+concurrency: mvr-dati
+jobs:
+  dati:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyogrio geopandas pyarrow shapely pandas
+      - run: python scripts/mvr_dati.py dist
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view mvr-dati >/dev/null 2>&1 || \
+            gh release create mvr-dati --title "MVR nogabalu dati" \
+              --notes "VMD Meža valsts reģistra meža dati (data.gov.lv, CC0), sagatavoti kartes sadaļai." --latest=false
+          gh release upload mvr-dati dist/* --clobber
+          gh release edit mvr-dati --notes "$(python -c 'import json;m=json.load(open("dist/mvr_meta.json"));print("VMD Meža valsts reģistra meža dati (data.gov.lv, CC0), sagatavoti kartes sadaļai.\n\nIzveidots: "+m["izveidots"]+"\nNogabali: "+str(sum(m["faili"].values()))+" · faili: "+str(len(m["faili"])))')"
+          gh release delete mvr-izpete -y --cleanup-tag || true
