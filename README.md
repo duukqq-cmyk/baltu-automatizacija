@@ -168,6 +168,17 @@ Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
   atjauno reizi nedēļā) tiek iezīmēta kartē, karte pietuvinās un ieslēdzas VMD nogabalu slānis.
   Ielādējot inventarizācijas PDF, tā zemes vienība tiek atrasta automātiski. Rāda reģistrēto un
   grafisko (LKS-92) platību; robežu var pievienot kā objektu.
+- **Nogabali no Meža valsts reģistra** (`karte/mvr.py`, `scripts/mvr_dati.py`) — atrodot zemes
+  vienību, tiek ielādēti tās nogabali ar robežām un taksācijas datiem (formula, vecums, bonitāte,
+  H, D, krāja) no VMD atvērtajiem datiem (CC0). GitHub Actions (`.github/workflows/mvr-dati.yml`)
+  reizi ceturksnī lejupielādē reģistru (~650 MB) un publicē to Release `mvr-dati` kā mazus failus
+  `mvr_XXXX.parquet` pa kadastra teritorijām; aplikācija ielādē tikai vajadzīgo. Kartē nogabali
+  ir klikšķināmi (dati, kailcirtes atbilstība, uzmērītā platība); tabulā var atzīmēt nogabalus un
+  ar vienu pogu iezīmēt tos kā cirsmu. Ja ielādēts inventarizācijas PDF, aprēķinā izmanto PDF
+  datus, bet robežas — no reģistra.
+- **Automātiska sadale pa nogabaliem** (`karte/parrekins.py`) — kailcirtes laukums tiek sadalīts
+  pa nogabaliem pēc robežu pārklāšanās (LKS-92), sīkas malu pārklāšanās (< 0,01 ha vai < 2 %)
+  tiek atmestas; manuāla piesaiste nogabalam ir noteicošā. Apjoms un summa pārrēķinās uzreiz.
 - **Zīmēšana un mērījumi** — laukumi, līnijas, taisnstūri, punkti (Leaflet.draw, latviski), robežu
   labošana un dzēšana, ātrais mērīšanas rīks, GPS atrašanās vieta, pāreja uz WGS84 / LKS-92 koordinātām.
   Platības un garumi tiek rēķināti **LKS-92 / TM (EPSG:3059)**; pārklāšanās tiek atzīmēta.

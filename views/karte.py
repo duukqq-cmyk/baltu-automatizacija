@@ -15,15 +15,22 @@ from branca.element import MacroElement, Template
 from folium import plugins
 from streamlit_folium import st_folium
 
+from cirsma.formula import SUGU_NOSAUKUMI, valdosa_suga
 from cirsma.labojumi import novertet_ar_labojumiem
 from cirsma.parser import parse_inventory_pdf
 from cirsma.report import excel_atskaite
+from cirsma.rules import novertet_nogabalu
 from karte.geometrija import (
     STATUSI, apvienot_ar_zimejumiem, ir_laukums, jauns_objekts, kopplatiba_ha, lks_uz_wgs, mervienibas,
     nolasit_failu, objekta_krasa, parklasanas, robezas, uz_geojson, uz_kml,
 )
 from karte.kadastrs import ATRIBUCIJA as VZD_ATRIBUCIJA, KadastrsKluda, apzimejumi, atrast
-from karte.parrekins import labojumi_no_kartes, nogabalu_saraksts, salidzinat
+from karte.mvr import MvrKluda, lejupieladet_teritoriju, nogabali_no_faila
+from karte.mvr import robezas as mvr_robezas, uz_inventarizaciju
+from karte.parrekins import (
+    CIRSMAS_STATUSS, labojumi_no_kartes, nogabalu_saraksts, objekta_sadalijums, salidzinat,
+    uzmeritas_platibas,
+)
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
 LATVIJA = {"center": [56.95, 24.6], "zoom": 8}
@@ -180,6 +187,66 @@ with st.expander("📥 Importēt KML / GeoJSON", expanded=not ss.karte_objekti):
 
 objekti: list[dict] = ss.karte_objekti
 
+# --- Nogabalu dati: MVR (pēc kadastra) un/vai inventarizācijas PDF ---------------
+
+
+@st.cache_data(show_spinner="Nolasa PDF…")
+def _nolasit_pdf(pdf_baiti: bytes):
+    cels = os.path.join(tempfile.gettempdir(), f"inv_{hashlib.sha1(pdf_baiti).hexdigest()}.pdf")
+    if not os.path.exists(cels):
+        with open(cels, "wb") as f:
+            f.write(pdf_baiti)
+    return parse_inventory_pdf(cels)
+
+
+@st.cache_data(ttl=12 * 3600, show_spinner="Ielādē nogabalu datus (Meža valsts reģistrs)…")
+def _mvr_teritorija(prefikss: str) -> bytes | None:
+    return lejupieladet_teritoriju(prefikss)
+
+
+def _mvr_nogabali(kadastrs: str):
+    try:
+        return nogabali_no_faila(_mvr_teritorija(kadastrs[:4]), kadastrs), None
+    except MvrKluda as e:
+        return None, str(e)
+
+
+inv_pdf, pdf_kluda = None, None
+if ss.get("inv_pdf"):
+    try:
+        inv_pdf = _nolasit_pdf(ss.inv_pdf["baiti"])
+    except Exception as e:  # noqa: BLE001
+        pdf_kluda = str(e)
+
+zv_kodi = [z["kadastrs"] for z in ss.karte_zv]
+if inv_pdf and inv_pdf.zemes_vieniba in zv_kodi:
+    ss.karte_aktiva_zv = inv_pdf.zemes_vieniba
+if ss.get("karte_aktiva_zv") not in zv_kodi:
+    ss.karte_aktiva_zv = zv_kodi[0] if zv_kodi else None
+aktiva_zv = ss.karte_aktiva_zv
+
+mvr_df, mvr_kluda = (_mvr_nogabali(aktiva_zv) if aktiva_zv else (None, None))
+nog_robezas: dict[str, dict] = {}
+inv = None
+if inv_pdf is not None and (not aktiva_zv or inv_pdf.zemes_vieniba in (None, aktiva_zv)):
+    inv = inv_pdf
+elif mvr_df is not None and len(mvr_df):
+    inv = uz_inventarizaciju(aktiva_zv, mvr_df)
+if mvr_df is not None and len(mvr_df):
+    nog_robezas = mvr_robezas(mvr_df)
+    if inv is inv_pdf and inv is not None and all(n.kvartals is None for n in inv.nogabali):
+        # PDF bez kvartāliem -> MVR apzīmējumus "1.kv. 12" pārveido uz "12"
+        nog_robezas = {k.split(" ", 1)[-1]: g for k, g in nog_robezas.items()}
+    if inv is not None:
+        nog_robezas = {k: g for k, g in nog_robezas.items() if k in {n.apzimejums for n in inv.nogabali}}
+
+uzmerits = uzmeritas_platibas(objekti, nog_robezas) if inv else {}
+cirsmas_vertejumi = {}
+if inv:
+    _lab = labojumi_no_kartes(inv, objekti, None, tikai_atzimetie=bool(uzmerits), nogabalu_robezas=nog_robezas)
+    cirsmas_vertejumi = {v.nogabals.apzimejums: v for v in novertet_ar_labojumiem(inv.nogabali, _lab)}
+sakotnejie = {n.apzimejums: novertet_nogabalu(n) for n in inv.nogabali} if inv else {}
+
 # --- Karte --------------------------------------------------------------------
 _OBJEKTI_JS = Template("""
 {% macro script(this, kwargs) %}
@@ -202,6 +269,30 @@ _OBJEKTI_JS = Template("""
         if (l.getTooltip && l.getTooltip() && {{ this.pastavigi }}) { l.closeTooltip(); l.openTooltip(); } }); }
     karte.on("resize zoomend", atjaunot);
     setTimeout(atjaunot, 400);
+})();
+{% endmacro %}
+""")
+
+_NOGABALI_JS = Template("""
+{% macro script(this, kwargs) %}
+(function() {
+    var karte = {{ this.karte }};
+    var slanis = L.geoJSON({{ this.dati }}, {
+        style: function(f) { return f.properties.stils; },
+        onEachFeature: function(f, layer) {
+            layer.bindTooltip(f.properties.uzraksts, {permanent: true, direction: "center",
+                                                     className: "nog-etikete"});
+            layer.bindPopup(f.properties.popup, {maxWidth: 360});
+        }
+    }).addTo(karte);
+    slanis.bringToBack();
+    function redzamiba() {
+        var z = karte.getZoom();
+        slanis.eachLayer(function(l) { var t = l.getTooltip(); if (!t) return;
+            if (z >= 15) { l.openTooltip(); } else { l.closeTooltip(); } });
+    }
+    karte.on("zoomend resize", redzamiba);
+    setTimeout(redzamiba, 400);
 })();
 {% endmacro %}
 """)
@@ -245,6 +336,11 @@ _STILS = """
   font: 600 11px/1.2 system-ui, sans-serif; padding: 1px 4px; color: #111;}
 .karte-etikete:before {display: none;}
 .leaflet-draw-tooltip {font-size: 12px;}
+.nog-etikete {background: transparent; border: 0; box-shadow: none; color: #fff;
+  font: 700 11px/1 system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; padding: 0;}
+.nog-etikete:before {display: none;}
+.nog-popup td {padding: 1px 6px 1px 0; vertical-align: top; font-size: 12px;}
+.nog-popup td:first-child {color: #666; white-space: nowrap;}
 </style>
 """
 
@@ -279,6 +375,50 @@ def _wms(s, opacity: float, overlay: bool) -> folium.WmsTileLayer:
     )
 
 
+def _nog_popup(n, apz: str) -> str:
+    v0 = sakotnejie.get(apz)
+    v = cirsmas_vertejumi.get(apz)
+    rindas = [("Nogabals", f"<b>{apz}</b>"), ("Platība", f"{n.platiba_ha:.2f} ha"),
+              ("Kategorija", n.zemes_veids)]
+    if n.ir_mezaudze:
+        rindas += [("Formula", n.formula or "—"), ("Vecums", f"{n.vecums or '—'} g."),
+                   ("Bonitāte", n.bonitate or "—"),
+                   ("H / D", f"{n.vid_augstums or '—'} m / {n.vid_caurmers or '—'} cm"),
+                   ("Krāja", f"{n.kraja_m3_ha:.0f} m³/ha" if n.kraja_m3_ha else "—")]
+    if apz in uzmerits:
+        rindas.append(("Uzmērīts kartē", f"<b>{uzmerits[apz]:.2f} ha</b>"))
+    if v0 is not None:
+        rindas.append(("Kailcirtei", ("✅ atbilst" if v0.atlauta_kailcirte else "✗ neatbilst")
+                       + f"<br><small>{v0.pamatojums}</small>"))
+    if v is not None and v.atlauta_kailcirte and apz in uzmerits:
+        from cirsma.sortiment import vertejuma_apjoms
+        rindas.append(("Cērtamais apjoms", f"<b>{vertejuma_apjoms(v)[0]:.0f} m³</b>"))
+    for p in n.piezimes[:4]:
+        rindas.append(("Piezīme", p))
+    return "<table class='nog-popup'>" + "".join(f"<tr><td>{a}</td><td>{b}</td></tr>" for a, b in rindas) \
+        + "</table>"
+
+
+def _nogabalu_slanis() -> dict:
+    pec_apz = {n.apzimejums: n for n in inv.nogabali}
+    features = []
+    for apz, g in nog_robezas.items():
+        n = pec_apz.get(apz)
+        if n is None:
+            continue
+        v0 = sakotnejie.get(apz)
+        if apz in uzmerits:
+            stils = {"color": "#ffffff", "weight": 2.5, "fillColor": "#e5484d", "fillOpacity": 0.12}
+        elif v0 is not None and v0.atlauta_kailcirte:
+            stils = {"color": "#4ade80", "weight": 2.5, "dashArray": "6 4", "fillOpacity": 0.05,
+                     "fillColor": "#4ade80"}
+        else:
+            stils = {"color": "#ffffff", "weight": 1.2, "opacity": 0.9, "fillOpacity": 0.02}
+        features.append({"type": "Feature", "geometry": g, "properties": {
+            "stils": stils, "uzraksts": str(n.nr), "popup": _nog_popup(n, apz)}})
+    return {"type": "FeatureCollection", "features": features}
+
+
 def uzbuvet_karti() -> folium.Map:
     skats = ss.karte_skats_html or LATVIJA
     m = folium.Map(location=skats["center"], zoom_start=skats["zoom"], tiles=None,
@@ -296,6 +436,9 @@ def uzbuvet_karti() -> folium.Map:
             tooltip=f"Zemes vienība {z['kadastrs']}" + (f" · {z['platiba_ha']:.2f} ha" if z["platiba_ha"] else ""),
             attr=VZD_ATRIBUCIJA,
         ).add_to(m)
+    if inv and nog_robezas:
+        m.add_child(_elements(_NOGABALI_JS, karte=m.get_name(),
+                              dati=json.dumps(_nogabalu_slanis(), ensure_ascii=False)))
     fg = folium.FeatureGroup(name="Objekti", control=False).add_to(m)
     dati = uz_geojson(objekti, ar_merijumiem=False)
     for f, o in zip(dati["features"], objekti):
@@ -374,47 +517,91 @@ k3.caption("Rīki kartes kreisajā pusē: ⬠ laukums · ╱ līnija · ▭ tais
 kartes_fragments()
 objekti = ss.karte_objekti
 
-# --- Inventarizācijas dati (nogabali) ------------------------------------------
+# --- Nogabali ------------------------------------------------------------------
 
 
-@st.cache_data(show_spinner="Nolasa PDF…")
-def _nolasit_pdf(pdf_baiti: bytes):
-    cels = os.path.join(tempfile.gettempdir(), f"inv_{hashlib.sha1(pdf_baiti).hexdigest()}.pdf")
-    if not os.path.exists(cels):
-        with open(cels, "wb") as f:
-            f.write(pdf_baiti)
-    return parse_inventory_pdf(cels)
+def _iezimet_cirsmu(apzimejumi_: list[str]) -> None:
+    """Kopē nogabalu robežas kā rediģējamus kailcirtes laukumus."""
+    for apz in apzimejumi_:
+        g = nog_robezas.get(apz)
+        if not g:
+            continue
+        poligoni = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
+        for i, c in enumerate(poligoni):
+            geom = {"type": "Polygon",
+                    "coordinates": [[[round(x, 6), round(y, 6)] for x, y, *_ in r] for r in c]}
+            nos = f"Cirsma {apz}" + (f" ({i + 1})" if len(poligoni) > 1 else "")
+            ss.karte_objekti = ss.karte_objekti + [jauns_objekts(geom, nos, statuss=CIRSMAS_STATUSS)]
+    _mainits()
 
 
-inv = None
-with st.expander("🌲 Nogabalu dati pārrēķinam (inventarizācijas PDF)",
-                 expanded=bool(objekti) and not ss.get("inv_pdf")):
+st.subheader("Nogabali")
+if len(zv_kodi) > 1:
+    st.selectbox("Zemes vienība", zv_kodi, key="karte_aktiva_zv",
+                 help="Kuras zemes vienības nogabalus rādīt un vērtēt")
+if mvr_kluda:
+    st.warning(f"Meža valsts reģistra dati nav pieejami: {mvr_kluda}")
+if pdf_kluda:
+    st.error(f"Neizdevās nolasīt PDF: {pdf_kluda}")
+
+if inv is None:
+    st.info("Atrodi zemes vienību pēc kadastra apzīmējuma (sānjosla) — nogabali ar robežām un "
+            "taksācijas datiem tiks ielādēti no Meža valsts reģistra. Vai ielādē inventarizācijas PDF.")
+else:
+    avots = (f"inventarizācijas PDF **{ss.inv_pdf['nosaukums']}**" if inv is inv_pdf
+             else "Meža valsts reģistra atvērtie dati (VMD, atjauno reizi ceturksnī)")
+    st.caption(f"Zemes vienība **{inv.zemes_vieniba or aktiva_zv or '—'}** · {len(inv.nogabali)} nogabali · "
+               f"dati: {avots}" + (" · robežas: MVR" if nog_robezas else " · nogabalu robežas nav pieejamas"))
+    nog_rindas = []
+    for n in inv.nogabali:
+        apz = n.apzimejums
+        v0 = sakotnejie.get(apz)
+        nog_rindas.append({
+            "Nogabals": apz, "Platība ha": n.platiba_ha, "Uzmērīts kartē ha": uzmerits.get(apz),
+            "Kategorija": n.zemes_veids, "Formula": n.formula,
+            "Valdošā suga": SUGU_NOSAUKUMI.get(valdosa_suga(n.formula), "") if n.formula else "",
+            "Vecums": n.vecums, "Bonitāte": n.bonitate, "Krāja m³/ha": n.kraja_m3_ha,
+            "Kailcirtei": ("✅" if v0.atlauta_kailcirte else "—") if v0 else "",
+            "Pamatojums": v0.pamatojums if v0 else "",
+        })
+    izvele = st.dataframe(
+        pd.DataFrame(nog_rindas), hide_index=True, use_container_width=True,
+        on_select="rerun", selection_mode="multi-row", key=f"nog_tabula_{aktiva_zv}",
+        column_config={
+            "Platība ha": st.column_config.NumberColumn(format="%.2f"),
+            "Uzmērīts kartē ha": st.column_config.NumberColumn(
+                format="%.2f", help="Kailcirtes laukumu daļa šajā nogabalā (automātiski pēc robežām "
+                                    "vai pēc manuālas piesaistes)"),
+            "Krāja m³/ha": st.column_config.NumberColumn(format="%.0f"),
+            "Pamatojums": st.column_config.TextColumn(width="large"),
+        },
+    )
+    atlasiti = [nog_rindas[i]["Nogabals"] for i in (izvele.selection.rows if izvele else [])]
+    b1, b2, b3 = st.columns([2, 2, 3])
+    b1.button(f"✏️ Iezīmēt kā cirsmu ({len(atlasiti)})", disabled=not (atlasiti and nog_robezas),
+              on_click=_iezimet_cirsmu, args=(atlasiti,), use_container_width=True, type="primary",
+              help="Nogabala robeža tiek nokopēta kā kailcirtes laukums — kartē to var labot (✎), "
+                   "un aprēķins pārrēķinās pēc uzmērītās platības.")
+    atbilst = [r["Nogabals"] for r in nog_rindas if r["Kailcirtei"] == "✅"]
+    b2.button(f"🌲 Visi kailcirtei atbilstošie ({len(atbilst)})", disabled=not (atbilst and nog_robezas),
+              on_click=_iezimet_cirsmu, args=(atbilst,), use_container_width=True)
+    b3.caption("Atzīmē rindas tabulā vai uzzīmē cirsmu kartē — laukums automātiski tiek sadalīts pa "
+               "nogabaliem. Kartē uzklikšķini uz nogabala, lai redzētu tā datus.")
+
+with st.expander("📄 Inventarizācijas PDF (precīzāki dati nekā reģistrā)", expanded=False):
     jauns_pdf = st.file_uploader("VMD vai gabali.lv nogabalu PDF", type="pdf", key="karte_pdf")
-    if jauns_pdf:
+    if jauns_pdf and (not ss.get("inv_pdf") or ss.inv_pdf["baiti"] != jauns_pdf.getvalue()):
         ss.inv_pdf = {"baiti": jauns_pdf.getvalue(), "nosaukums": jauns_pdf.name}
-    if ss.get("inv_pdf"):
-        try:
-            inv = _nolasit_pdf(ss.inv_pdf["baiti"])
-            st.caption(f"Ielādēts: **{ss.inv_pdf['nosaukums']}** · {inv.avots} · NĪ {inv.ipasums or '—'} · "
-                       f"zemes vienība {inv.zemes_vieniba or '—'} · {len(inv.nogabali)} nogabali "
-                       "(to pašu failu redz arī Meža inventarizācijas sadaļa).")
-            pdf_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest()
-            if inv.zemes_vieniba and ss.get("karte_pdf_meklets") != pdf_id:
-                # Jauns PDF -> automātiski atrod tā zemes vienību kartē
-                ss.karte_pdf_meklets = pdf_id
-                if inv.zemes_vieniba not in {z["kadastrs"] for z in ss.karte_zv}:
-                    _meklet_kadastru([inv.zemes_vieniba])
-                    st.rerun()
-            zv = next((z for z in ss.karte_zv if z["kadastrs"] == inv.zemes_vieniba), None)
-            if zv and zv["platiba_ha"]:
-                kopa = sum(n.platiba_ha for n in inv.nogabali)
-                st.caption(f"📍 Zemes vienība {zv['kadastrs']} atzīmēta kartē (dzeltena svītrlīnija): "
-                           f"kadastrā {zv['platiba_ha']:.2f} ha, pēc robežām {zv['platiba_graf_ha']:.2f} ha, "
-                           f"nogabalu kopplatība PDF {kopa:.2f} ha.")
-        except Exception as e:  # noqa: BLE001
-            st.error(f"Neizdevās nolasīt PDF: {e}")
-    else:
-        st.caption("Ielādē PDF, lai kartes laukumus varētu piesaistīt nogabaliem un pārrēķināt cirsmu.")
+        pdf_inv = _nolasit_pdf(ss.inv_pdf["baiti"])
+        if pdf_inv.zemes_vieniba and pdf_inv.zemes_vieniba not in zv_kodi:
+            _meklet_kadastru([pdf_inv.zemes_vieniba])
+        st.rerun()
+    if inv_pdf is not None:
+        zv = next((z for z in ss.karte_zv if z["kadastrs"] == inv_pdf.zemes_vieniba), None)
+        st.caption(f"Ielādēts: **{ss.inv_pdf['nosaukums']}** · {inv_pdf.avots} · NĪ {inv_pdf.ipasums or '—'} · "
+                   f"zemes vienība {inv_pdf.zemes_vieniba or '—'} · {len(inv_pdf.nogabali)} nogabali"
+                   + (f" · kadastrā {zv['platiba_ha']:.2f} ha" if zv and zv["platiba_ha"] else ""))
+    st.caption("Ja PDF ir ielādēts, aprēķinā izmanto PDF datus, bet nogabalu robežas — no reģistra.")
 
 nogabali = nogabalu_saraksts(inv) if inv else {}
 
@@ -463,6 +650,10 @@ else:
             "Veids": veids,
             "Platība ha": m["platiba_ha"] if veids == "Laukums" else None,
             "Perimetrs / garums m": m["garums_m"] if veids != "Punkts" else None,
+            "Nogabali (pēc robežām)": ("; ".join(f"{k}: {v:.2f} ha" for k, v in
+                                                 objekta_sadalijums(o, nog_robezas).items())
+                                       if veids == "Laukums" and nog_robezas and not o.get("nogabals")
+                                       else ""),
             "LKS-92 x": m["x"], "LKS-92 y": m["y"],
             "Piezīmes": o.get("piezimes") or "",
         })
@@ -493,21 +684,23 @@ else:
     st.data_editor(
         df, key=atsl, on_change=_saglabat_tabulu, args=(atsl, ids), hide_index=True,
         use_container_width=True, num_rows="delete",
-        disabled=["Veids", "Platība ha", "Perimetrs / garums m", "LKS-92 x", "LKS-92 y"]
+        disabled=["Veids", "Platība ha", "Perimetrs / garums m", "LKS-92 x", "LKS-92 y",
+                  "Nogabali (pēc robežām)"]
         + ([] if nogabali else ["Nogabals"]),
         column_config={
             "Statuss": st.column_config.SelectboxColumn(options=list(STATUSI), required=True,
                                                         help="Nosaka krāsu kartē; 'Kailcirte' laukumi veido cirsmu"),
             "Nogabals": (st.column_config.SelectboxColumn(
                 options=nog_opcijas, width="large",
-                help="Piesaisti laukumu inventarizācijas nogabalam — pārrēķinā nogabala platība = "
-                     "piesaistīto kailcirtes laukumu summa")
+                help="Neobligāti: piesaisti visu laukumu vienam nogabalam. Ja tukšs un nogabalu "
+                     "robežas zināmas, laukums tiek sadalīts pa nogabaliem automātiski.")
                 if nogabali else st.column_config.TextColumn(help="Ielādē nogabalu PDF, lai varētu piesaistīt")),
             "Platība ha": st.column_config.NumberColumn(format="%.2f", help="Aprēķināts LKS-92 (EPSG:3059)"),
             "Perimetrs / garums m": st.column_config.NumberColumn(format="%.0f"),
             "LKS-92 x": st.column_config.NumberColumn(format="%d", help="Centra austrumu koordināta (E)"),
             "LKS-92 y": st.column_config.NumberColumn(format="%d", help="Centra ziemeļu koordināta (N)"),
             "Piezīmes": st.column_config.TextColumn(width="medium"),
+            "Nogabali (pēc robežām)": st.column_config.TextColumn(width="medium"),
         },
     )
 
@@ -532,47 +725,56 @@ else:
 
 # --- Pārrēķins ------------------------------------------------------------------
 if inv and objekti:
-    st.subheader("Cirsmas pārrēķins pēc kartes")
-    piesaistiti = [o for o in objekti if o.get("nogabals") and o["statuss"] == "Kailcirte" and ir_laukums(o)]
-    if not piesaistiti:
-        st.info("Tabulā kolonnā **Nogabals** piesaisti kailcirtes laukumus nogabaliem — tad šeit "
-                "redzēsi apjoma un vērtības pārrēķinu.")
+    st.subheader("Cirsmas aprēķins pēc kartes")
+    if not uzmerits:
+        st.info("Uzzīmē kailcirtes laukumu nogabalu robežās (vai atzīmē nogabalus tabulā un spied "
+                "**Iezīmēt kā cirsmu**) — šeit uzreiz redzēsi apjomu un iegādes summu."
+                + ("" if nog_robezas else " Bez nogabalu robežām laukumu piesaisti nogabalam tabulā "
+                   "kolonnā **Nogabals**."))
     else:
-        esosie = ss.labojumi if ss.get("faila_id") == hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest() else {}
+        ir_pdf = inv is inv_pdf
+        pdf_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest() if ir_pdf else None
+        esosie = ss.labojumi if ir_pdf and ss.get("faila_id") == pdf_id else {}
         tikai = st.toggle("Cirsmā tikai kartē atzīmētie nogabali", value=True,
                           help="Ieslēgts: nogabali bez kailcirtes laukuma kartē netiek cirsti. "
-                               "Izslēgts: tiem paliek sistēmas / PDF lēmums.")
-        s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai)
-        m1, m2, m3 = st.columns(3)
-        m1.metric("Cērtamais apjoms", f"{s.pec.kopejais_m3:,.0f} m³",
-                  f"{s.pec.kopejais_m3 - s.pirms.kopejais_m3:+,.0f} m³ pret PDF")
-        m2.metric("Max iegādes summa", f"{s.pec.max_iegades_summa:,.0f} EUR",
+                               "Izslēgts: pārējiem paliek sistēmas lēmums pēc kailcirtes kritērijiem.")
+        s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai, nogabalu_robezas=nog_robezas)
+        uz = "inventarizāciju" if ir_pdf else "reģistra platībām"
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Cirsmas platība", f"{sum(uzmerits.values()):.2f} ha")
+        m2.metric("Cērtamais apjoms", f"{s.pec.kopejais_m3:,.0f} m³",
+                  f"{s.pec.kopejais_m3 - s.pirms.kopejais_m3:+,.0f} m³ pret {uz}")
+        m3.metric("Max iegādes summa", f"{s.pec.max_iegades_summa:,.0f} EUR",
                   f"{s.pec.max_iegades_summa - s.pirms.max_iegades_summa:+,.0f} EUR")
-        m3.metric("Cena", f"{s.pec.cena_eur_m3:.2f} EUR/m³",
-                  f"{s.pec.cena_eur_m3 - s.pirms.cena_eur_m3:+.2f}")
+        m4.metric("Cena", f"{s.pec.cena_eur_m3:.2f} EUR/m³", f"{s.pec.cena_eur_m3 - s.pirms.cena_eur_m3:+.2f}")
         tab = pd.DataFrame(s.rindas)
         tab["Uzmērīts kartē ha"] = [f"{x:.2f}" if x is not None else "—" for x in tab["Uzmērīts kartē ha"]]
         st.dataframe(tab, hide_index=True, use_container_width=True,
-                     column_config={"Platība PDF ha": st.column_config.NumberColumn(format="%.2f"),
+                     column_config={"Platība inventarizācijā ha": st.column_config.NumberColumn(format="%.2f"),
                                     "Piezīme": st.column_config.TextColumn(width="large")})
+        if s.pec.pa_sugam_m3:
+            st.caption("Apjoms pa sugām: " + " · ".join(
+                f"{SUGU_NOSAUKUMI.get(k, k)} {v:,.0f} m³" for k, v in s.pec.pa_sugam_m3.items()))
         st.caption("Aprēķinā noklusējuma sortimentu cenas un izdevumi (kā Meža inventarizācijas sadaļā). "
                    "Apjoms = krāja m³/ha × uzmērītā platība; sugu proporcijas saglabājas.")
 
-        jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai)
+        jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai, nog_robezas)
         v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie)
         p1, p2 = st.columns(2)
-        xlsx = os.path.join(tempfile.gettempdir(), f"karte_{hashlib.sha1(json.dumps(uz_geojson(objekti, False)).encode()).hexdigest()[:10]}.xlsx")
+        xlsx = os.path.join(tempfile.gettempdir(),
+                            f"karte_{hashlib.sha1(json.dumps(uz_geojson(objekti, False)).encode()).hexdigest()[:10]}.xlsx")
         excel_atskaite(xlsx, inv, v_pec, s.pec)
         with open(xlsx, "rb") as f:
             p1.download_button("⬇️ Excel atskaite ar kartes platībām", f.read(),
-                               file_name="cirsmas_atskaite_karte.xlsx", use_container_width=True)
-        if p2.button("➡️ Pārnest uz Meža inventarizāciju", use_container_width=True,
-                     help="Kartes platības kļūst par labojumiem nogabalu tabulā (var atiestatīt)."):
-            ss.faila_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest()
+                               file_name=f"cirsma_{inv.zemes_vieniba or 'karte'}.xlsx", use_container_width=True)
+        if ir_pdf and p2.button("➡️ Pārnest uz Meža inventarizāciju", use_container_width=True,
+                                help="Kartes platības kļūst par labojumiem nogabalu tabulā (var atiestatīt)."):
+            ss.faila_id = pdf_id
             ss.labojumi = jaunie
             ss.tabulas_versija = ss.get("tabulas_versija", 0) + 1
             st.switch_page("views/mezs.py")
 
 st.divider()
 st.caption("Kartes dati: LVM GEO brīvpieejas WMS (ortofoto, LiDAR veģetācijas augstums — LĢIA; "
-           "mežaudžu plāns — VMD; kadastrs — VZD); zemes vienību robežas — VZD INSPIRE WFS (CC BY 4.0). Platības rēķinātas LKS-92 / TM (EPSG:3059).")
+           "mežaudžu plāns — VMD; kadastrs — VZD); zemes vienību robežas — VZD INSPIRE WFS (CC BY 4.0); "
+           "nogabalu robežas un dati — VMD Meža valsts reģistra atvērtie dati (CC0). Platības rēķinātas LKS-92 / TM (EPSG:3059).")

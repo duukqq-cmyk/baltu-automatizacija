@@ -188,3 +188,59 @@ def test_kadastrs_rezerves_serviss(monkeypatch):
     monkeypatch.setattr(k.urllib.request, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("x")))
     with pytest.raises(k.KadastrsKluda):
         k.atrast(["64560020029"])
+
+
+# --- MVR nogabali un automātiskā sadale pa nogabaliem -------------------------------
+
+def _mvr_parquet():
+    import io as _io
+    import pandas as pd
+    import shapely
+    from shapely.geometry import shape
+    t = _no_lks()
+    rindas = []
+    for nog, x0, plat in [(1, 500_000, 100), (2, 500_100, 100)]:     # divi blakus 1 ha nogabali
+        g = shape(_kvadrats_lks(x0, 300_000, plat))
+        rindas.append({"kadastrs": "64560020029", "kvart": "3", "nog": str(nog), "anog": "0",
+                       "nog_plat": 1.0, "zkat": "10", "mt": "4", "izc": "1", "formula": "8P2B",
+                       "a10": 101.0, "h10": 27.0, "d10": 32.0, "v_nog": 300.0, "bon": "1",
+                       "p_darbv": "0", "p_cirp": "0", "plant_audz": "0", "geom": shapely.to_wkb(g)})
+    rindas.append({**rindas[0], "kadastrs": "64560020030", "nog": "9"})
+    buf = _io.BytesIO()
+    pd.DataFrame(rindas).to_parquet(buf, index=False)
+    return buf.getvalue()
+
+
+def test_mvr_nogabali_un_vertejums():
+    from cirsma.rules import novertet_nogabalu
+    from karte.mvr import nogabali_no_faila, robezas, uz_inventarizaciju
+    df = nogabali_no_faila(_mvr_parquet(), "64560020029")
+    assert len(df) == 2
+    inv = uz_inventarizaciju("64560020029", df)
+    n = inv.nogabali[0]
+    assert (n.apzimejums, n.bonitate, n.vecums, n.kraja_m3_ha, n.zemes_veids) == \
+        ("3.kv. 1", "I", 101, 300.0, "Mežaudze")
+    assert novertet_nogabalu(n).atlauta_kailcirte            # 101 g. priede, I bon.
+    r = robezas(df)
+    assert set(r) == {"3.kv. 1", "3.kv. 2"}
+    assert mervienibas(r["3.kv. 1"])["platiba_ha"] == pytest.approx(1.0, abs=0.001)
+    assert nogabali_no_faila(None, "1").empty
+
+
+def test_cirsma_automatiski_sadalas_pa_nogabaliem():
+    from karte.mvr import nogabali_no_faila, robezas, uz_inventarizaciju
+    from karte.parrekins import salidzinat, uzmeritas_platibas
+    df = nogabali_no_faila(_mvr_parquet(), "64560020029")
+    inv, rob = uz_inventarizaciju("64560020029", df), robezas(df)
+    # Cirsma: 60 m no 1. nogabala + 40 m no 2. (100 m augstumā) = 0.6 ha + 0.4 ha
+    cirsma = jauns_objekts(_kvadrats_lks(500_040, 300_000, 100), "C")
+    assert uzmeritas_platibas([cirsma], rob) == {"3.kv. 1": 0.6, "3.kv. 2": 0.4}
+    # Sīka pārklāšanās ar kaimiņu (< 0.01 ha) tiek atmesta
+    gandriz = jauns_objekts(_kvadrats_lks(500_000.5, 300_000, 99.6), "G")
+    assert set(uzmeritas_platibas([gandriz], rob)) == {"3.kv. 1"}
+    # Manuāla piesaiste ir noteicošā
+    cirsma_p = dict(cirsma, nogabals="3.kv. 2")
+    assert uzmeritas_platibas([cirsma_p], rob) == {"3.kv. 2": 1.0}
+    s = salidzinat(inv, [cirsma], tikai_atzimetie=True, nogabalu_robezas=rob)
+    assert s.pec.kopejais_m3 == pytest.approx(300 * 1.0, rel=0.01)   # 300 m³/ha × (0.6+0.4) ha
+    assert s.pirms.kopejais_m3 == pytest.approx(600, rel=0.01)
