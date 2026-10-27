@@ -1,0 +1,23 @@
+name: VZD pieejamības pārbaude (pagaidu)
+on:
+  push:
+    branches: [vzd-probe]
+permissions:
+  contents: write
+jobs:
+  p:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          {
+          for u in "https://geo-dpps.viss.gov.lv/api/DPPSPackage/client/Zemes_vien_423_0p2RBZ/5cc09e19-a238-4a2e-8eac-3a05cefa050e?service=WFS&request=GetCapabilities" \
+                   "https://grafws.kadastrs.lv/geoserver/cp/wfs?service=WFS&request=GetCapabilities" \
+                   "https://grafws.kadastrs.lv/atom/cp/atom.xml"; do
+            echo "== $u"; curl -sS -m 25 -o out.txt -w "%{http_code} %{size_download}B %{time_total}s\n" "$u" 2>&1; head -c 600 out.txt | tr -d '\r'; echo
+          done
+          echo "== IP"; curl -s -m 10 https://ipinfo.io/json
+          } > z.md 2>&1
+          gh release delete vzd-probe -y --cleanup-tag -R ${{ github.repository }} || true
+          gh release create vzd-probe --prerelease --title "VZD probe" --notes-file z.md --latest=false -R ${{ github.repository }} --target ${{ github.sha }}
