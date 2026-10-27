@@ -256,10 +256,10 @@ atskaite = teksta_atskaite(inv, vertejumi, fin)
 with st.expander("Gala atskaite", expanded=False):
     st.code(atskaite, language=None)
 
-xlsx_cels = cels.replace(".pdf", "_atskaite.xlsx")
-excel_atskaite(xlsx_cels, inv, vertejumi, fin)
-with open(xlsx_cels, "rb") as f:
-    st.download_button("⬇️ Lejupielādēt Excel atskaiti", f,
-                       file_name="cirsmas_atskaite.xlsx",
-                       mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.download_button("⬇️ Lejupielādēt teksta atskaiti", atskaite, file_name="cirsmas_atskaite.txt")
+    xlsx_cels = cels.replace(".pdf", "_atskaite.xlsx")
+    excel_atskaite(xlsx_cels, inv, vertejumi, fin)
+    with open(xlsx_cels, "rb") as f:
+        st.download_button("⬇️ Lejupielādēt Excel atskaiti", f,
+                           file_name="cirsmas_atskaite.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    st.download_button("⬇️ Lejupielādēt teksta atskaiti", atskaite, file_name="cirsmas_atskaite.txt")
