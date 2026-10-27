@@ -21,10 +21,20 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyogrio geopandas pyarrow shapely pandas
-      - run: python scripts/mvr_dati.py dist
+      - run: |
+          set -o pipefail
+          python -u scripts/mvr_dati.py dist 2>&1 | tee zurnals.txt
+      - if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete mvr-zurnals -y --cleanup-tag || true
+          { echo "Statuss: ${{ job.status }} · $(date -u)"; echo '```'; tail -c 60000 zurnals.txt 2>/dev/null; echo '```'; } > z.md
+          gh release create mvr-zurnals --prerelease --title "MVR datu žurnāls" --notes-file z.md --latest=false
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          ls dist | wc -l
           gh release view mvr-dati >/dev/null 2>&1 || \
             gh release create mvr-dati --title "MVR nogabalu dati" \
               --notes "VMD Meža valsts reģistra meža dati (data.gov.lv, CC0), sagatavoti kartes sadaļai." --latest=false

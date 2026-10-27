@@ -36,14 +36,21 @@ LAUKI = [
 ]
 
 
+UA = {"User-Agent": "Mozilla/5.0 (baltu-automatizacija MVR datu sagatavošana)"}
+
+
+def _atvert(url: str, timeout: float):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=timeout)
+
+
 def _lejupieladet(url: str, merkis: str) -> None:
-    with urllib.request.urlopen(url, timeout=600) as r, open(merkis, "wb") as f:
+    with _atvert(url, 900) as r, open(merkis, "wb") as f:
         shutil.copyfileobj(r, f, length=1 << 20)
 
 
 def main(izvade: str) -> None:
     os.makedirs(izvade, exist_ok=True)
-    pakete = json.load(urllib.request.urlopen(DATU_KOPA, timeout=60))["result"]
+    pakete = json.load(_atvert(DATU_KOPA, 60))["result"]
     resursi = [r for r in pakete["resources"] if r["url"].endswith(".7z")]
     dalas: dict[str, list[pd.DataFrame]] = defaultdict(list)
     meta = {"izveidots": datetime.now(timezone.utc).isoformat(timespec="seconds"),
