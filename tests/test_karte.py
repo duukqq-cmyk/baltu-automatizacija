@@ -279,3 +279,25 @@ def test_mvr_sakrit_ar_vmd_pdf():
     # Robežu platības atbilst reģistra platībām (±3 %)
     for apz, g in robezas(df).items():
         assert mervienibas(g)["platiba_ha"] == pytest.approx(pec_apz[apz].platiba_ha, rel=0.03, abs=0.01)
+
+
+@pytest.mark.skipif(not os.path.exists(MVR_FIX), reason="Nav parauga")
+def test_visa_zemes_vieniba_bez_jaunaudzem():
+    """Uzzīmējot visu zemes vienību, cirsmā nonāk tikai kailcirtei atbilstošie nogabali."""
+    import shapely
+    from shapely.geometry import mapping as _map
+    from cirsma.rules import atlasit_kailcirtes
+    from karte.mvr import nogabali_no_faila, robezas, uz_inventarizaciju
+    from karte.parrekins import salidzinat
+    with open(MVR_FIX, "rb") as f:
+        df = nogabali_no_faila(f.read(), "64560020029")
+    inv, rob = uz_inventarizaciju("64560020029", df), robezas(df)
+    visa = shapely.union_all([shapely.from_wkb(b) for b in df["geom"]]).buffer(0.0001)
+    ext = [[round(x, 6), round(y, 6)] for x, y in visa.exterior.coords]
+    o = jauns_objekts({"type": "Polygon", "coordinates": [ext]}, "Visa ZV")
+    s = salidzinat(inv, [o], nogabalu_robezas=rob)
+    sakotnejais = sum(1 for v in atlasit_kailcirtes(inv.nogabali) if v.atlauta_kailcirte)
+    assert sum(r["Cirsmā pēc"] for r in s.rindas) == sakotnejais
+    assert any(r["Piezīme"].startswith("⚠ Atzīmēts kartē") for r in s.rindas)
+    s2 = salidzinat(inv, [o], nogabalu_robezas=rob, ieklaut_neatbilstosos=True)
+    assert s2.pec.kopejais_m3 > s.pec.kopejais_m3

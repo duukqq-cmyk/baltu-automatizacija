@@ -60,12 +60,24 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
     st.session_state.tabulas_versija += 1
 
 
-st.title("🌲 Cirsmas vērtības aprēķins no meža inventarizācijas PDF")
-st.caption(
-    "Augšupielādē nogabalu raksturojošo rādītāju PDF (VMD vai gabali.lv — formātu atpazīst "
-    "automātiski). Sistēma atlasa kailcirtei atbilstošos nogabalus, aprēķina apjomu pa sugām "
-    "un maksimālo iegādes summu, kā arī atzīmē riskus (aizsargjoslas, VMD plānotā darbība u.c.)."
-)
+st.title("🌲 Cirsmas vērtības aprēķins")
+AVOTS_PDF, AVOTS_KARTE = "📄 No inventarizācijas PDF", "🗺️ Aprēķins no kartes"
+if st.session_state.pop("mezs_uz_karti", False):
+    st.session_state.mezs_avots = AVOTS_KARTE
+st.session_state.setdefault("mezs_avots", AVOTS_PDF)
+avots = st.segmented_control("Datu avots", [AVOTS_PDF, AVOTS_KARTE], key="mezs_avots",
+                             label_visibility="collapsed") or AVOTS_PDF
+if avots == AVOTS_PDF:
+    st.caption(
+        "Augšupielādē nogabalu raksturojošo rādītāju PDF (VMD vai gabali.lv — formātu atpazīst "
+        "automātiski). Sistēma atlasa kailcirtei atbilstošos nogabalus, aprēķina apjomu pa sugām "
+        "un maksimālo iegādes summu, kā arī atzīmē riskus (aizsargjoslas, VMD plānotā darbība u.c.)."
+    )
+else:
+    st.caption(
+        "Aprēķins pēc kartē uzmērītās cirsmas: nogabalu dati no Meža valsts reģistra (vai PDF), "
+        "platības — no kartes. Cenas un izdevumus maini sānjoslā; nogabalu tabulā vari vēl labot vērtības."
+    )
 
 # --- Sānjosla: rediģējamas cenas un izdevumi -------------------------------
 st.sidebar.header("Sortimentu cenas un izdevumi")
@@ -96,9 +108,31 @@ with st.sidebar.expander("Izdevumi (EUR/m3)", expanded=True):
         izdevumi[poz] = st.number_input(poz, min_value=0.0, value=float(likme), step=0.5)
 pelna = st.sidebar.slider("Peļņas rezerve, %", 0, 50, int(NOKLUSEJUMA_PELNAS_REZERVE * 100)) / 100
 
+# --- Dati: no kartes ----------------------------------------------------------
+if avots == AVOTS_KARTE:
+    ka = st.session_state.get("karte_aprekins")
+    if not ka or not ka.get("uzmerits"):
+        st.info("Kartē vēl nav uzmērītas cirsmas. Atrodi zemes vienību pēc kadastra, uzzīmē vai "
+                "pārzīmē cirsmu — tad aprēķins parādīsies šeit.")
+        if st.button("🗺️ Atvērt karti", type="primary"):
+            st.switch_page("views/karte.py")
+        st.stop()
+    inv = ka["inv"]
+    cels = os.path.join(tempfile.gettempdir(), f"karte_{ka['id']}.pdf")
+    st.caption(f"🗺️ {ka['apraksts']} · uzmērīts kartē: " + ", ".join(
+        f"{k} — {v:.2f} ha" for k, v in ka["uzmerits"].items()))
+    faila_id = ka["id"]
+    if st.session_state.get("faila_id") != faila_id:
+        # Jauni kartes mērījumi -> labojumi no kartes (tabulā tos var labot tālāk)
+        st.session_state.faila_id = faila_id
+        st.session_state.labojumi = copy.deepcopy(ka["labojumi"])
+        st.session_state.tabulas_versija = st.session_state.get("tabulas_versija", 0) + 1
+
 # --- PDF augšupielāde ------------------------------------------------------
-fails = st.file_uploader("Meža inventarizācijas PDF", type="pdf")
-if fails:
+fails = st.file_uploader("Meža inventarizācijas PDF", type="pdf") if avots == AVOTS_PDF else None
+if avots == AVOTS_KARTE:
+    pass
+elif fails:
     # Kopīgs ar Kartes sadaļu — tur var piesaistīt kartes laukumus šī PDF nogabaliem
     st.session_state.inv_pdf = {"baiti": fails.getvalue(), "nosaukums": fails.name}
 elif st.session_state.get("inv_pdf"):
@@ -107,21 +141,22 @@ else:
     st.info("⬆️ Augšupielādē PDF failu, lai sāktu (paraugs: `dati/Nogabalu_raksturojosie_raditaji_64560020029.pdf`).")
     st.stop()
 
-pdf_baiti = st.session_state.inv_pdf["baiti"]
-cels = _saglabat_pdf(pdf_baiti)
+if avots == AVOTS_PDF:
+    pdf_baiti = st.session_state.inv_pdf["baiti"]
+    cels = _saglabat_pdf(pdf_baiti)
 
-try:
-    inv = _nolasit(pdf_baiti)
-except Exception as e:  # noqa: BLE001
-    st.error(f"Neizdevās apstrādāt failu: {e}")
-    st.stop()
+    try:
+        inv = _nolasit(pdf_baiti)
+    except Exception as e:  # noqa: BLE001
+        st.error(f"Neizdevās apstrādāt failu: {e}")
+        st.stop()
 
-# Labojumi dzīvo sesijā; jauns fails -> labojumi no jauna
-faila_id = hashlib.sha1(pdf_baiti).hexdigest()
-if st.session_state.get("faila_id") != faila_id:
-    st.session_state.faila_id = faila_id
-    st.session_state.labojumi = {}
-    st.session_state.tabulas_versija = 0
+    # Labojumi dzīvo sesijā; jauns fails -> labojumi no jauna
+    faila_id = hashlib.sha1(pdf_baiti).hexdigest()
+    if st.session_state.get("faila_id") != faila_id:
+        st.session_state.faila_id = faila_id
+        st.session_state.labojumi = {}
+        st.session_state.tabulas_versija = 0
 labojumi: dict[str, Labojums] = st.session_state.labojumi
 
 try:
@@ -220,8 +255,10 @@ if labojumi:
     )
     l1.info(f"✎ Manuāli laboti {len(izmainas)} nogabali — aprēķins un atskaites ņem vērā labojumus."
             + (f"\n\n{atsifrejums}" if atsifrejums else ""))
-    if l2.button("↺ Atiestatīt visus labojumus", use_container_width=True):
-        st.session_state.labojumi = {}
+    if l2.button("↺ Atiestatīt visus labojumus" if avots == AVOTS_PDF else "↺ Atjaunot kartes mērījumus",
+                 use_container_width=True):
+        st.session_state.labojumi = (copy.deepcopy(st.session_state.karte_aprekins["labojumi"])
+                                     if avots == AVOTS_KARTE else {})
         st.session_state.tabulas_versija += 1
         st.rerun()
 

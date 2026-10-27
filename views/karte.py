@@ -56,6 +56,7 @@ if ss.pop("karte_ieslegt_nogabalus", False):
 # saglabā skatu `karte_skats`, bet HTML izmanto `karte_skats_html`, lai karte nepārlādētos.
 ss.karte_skats_html = ss.karte_skats
 ss.karte_pietuvinat_html = ss.karte_pietuvinat
+ss.karte_fokuss_html = ss.karte_fokuss
 
 
 def _mainits(pietuvinat: bool = False) -> None:
@@ -135,8 +136,9 @@ def _zv_ka_objekts(kadastrs: str) -> None:
     for i, c in enumerate(poligoni):
         nos = f"ZV {kadastrs}" + (f" ({i + 1})" if len(poligoni) > 1 else "")
         geom = {"type": "Polygon", "coordinates": [[[round(x, 6), round(y, 6)] for x, y, *_ in r] for r in c]}
-        ss.karte_objekti = ss.karte_objekti + [jauns_objekts(geom, nos, statuss="Cits")]
-    _mainits()
+        ss.karte_objekti = ss.karte_objekti + [jauns_objekts(geom, nos, statuss=CIRSMAS_STATUSS)]
+    ss.karte_fokuss = [kadastrs]
+    _mainits(pietuvinat=True)
 
 
 # --- Sānjosla: kadastrs -----------------------------------------------------
@@ -159,9 +161,10 @@ for z in ss.karte_zv:
                         help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
                              f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
         b, c = st.columns(2)
-        b.button("Kā objekts", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
+        b.button("✏️ Pārzīmēt", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
                  args=(z["kadastrs"],), use_container_width=True,
-                 help="Pievienot zemes vienības robežu kā objektu (mērījumiem, eksportam)")
+                 help="Nokopē robežu kā labojamu cirsmu: kartē spied ✎, velc virsotnes — platība, "
+                      "malu garumi un aprēķins atjaunojas.")
         c.button("Noņemt", key=f"zv_del_{z['kadastrs']}", on_click=_nonemt_zv, args=(z["kadastrs"],),
                  use_container_width=True)
 
@@ -283,7 +286,7 @@ _OBJEKTI_JS = Template("""
 {% macro script(this, kwargs) %}
 (function() {
     var fc = {{ this.dati }};
-    var fg = {{ this.fg }};
+    var fg = {{ this.fg_el.get_name() }};
     L.geoJSON(fc, {
         style: function(f) { return {color: f.properties.krasa, weight: 2.5,
                                      fillColor: f.properties.krasa, fillOpacity: 0.25}; },
@@ -295,11 +298,46 @@ _OBJEKTI_JS = Template("""
         }
     });
     // Pastāvīgie uzraksti jāpārvieto, kad kartes izmērs mainās (iframe ielāde)
-    var karte = {{ this.karte }};
+    var karte = {{ this._parent.get_name() }};
     function atjaunot() { fg.eachLayer(function(l) {
         if (l.getTooltip && l.getTooltip() && {{ this.pastavigi }}) { l.closeTooltip(); l.openTooltip(); } }); }
     karte.on("resize zoomend", atjaunot);
     setTimeout(atjaunot, 400);
+
+    // Malu garumi un virsotnes (kā LVM GEO) — atjaunojas arī labošanas laikā
+    var garumi = L.layerGroup().addTo(karte);
+    function gredzeni(ll) {
+        if (!ll.length) return [];
+        if (ll[0] instanceof L.LatLng) return [ll];
+        return ll.reduce(function(a, x) { return a.concat(gredzeni(x)); }, []);
+    }
+    function teksts(d) { return d < 1000 ? d.toFixed(d < 100 ? 1 : 0) + " m" : (d / 1000).toFixed(2) + " km"; }
+    function zimetGarumus() {
+        garumi.clearLayers();
+        if (karte.getZoom() < 14) return;
+        fg.eachLayer(function(l) {
+            if (!(l instanceof L.Polyline)) return;
+            var slegts = l instanceof L.Polygon;
+            gredzeni(l.getLatLngs()).forEach(function(r) {
+                var n = r.length;
+                for (var i = 0; i < n; i++) {
+                    L.circleMarker(r[i], {radius: 4, color: "#fff", weight: 1.5, fillColor: "#f97316",
+                                          fillOpacity: 1, interactive: false}).addTo(garumi);
+                    if (!slegts && i === n - 1) break;
+                    var a = r[i], b = r[(i + 1) % n], d = karte.distance(a, b);
+                    if (d < 3) continue;
+                    var px = karte.latLngToLayerPoint(a).distanceTo(karte.latLngToLayerPoint(b));
+                    if (px < 45) continue;   // pārāk īsa mala šajā mērogā
+                    L.marker(L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2), {interactive: false,
+                        icon: L.divIcon({className: "seg-garums", html: "<span>" + teksts(d) + "</span>",
+                                         iconSize: null})}).addTo(garumi);
+                }
+            });
+        });
+    }
+    karte.on("zoomend draw:created draw:edited draw:deleted draw:editvertex draw:editmove " +
+             "draw:editresize draw:editstop draw:deletestop", function() { setTimeout(zimetGarumus, 0); });
+    setTimeout(zimetGarumus, 450);
 })();
 {% endmacro %}
 """)
@@ -307,7 +345,7 @@ _OBJEKTI_JS = Template("""
 _NOGABALI_JS = Template("""
 {% macro script(this, kwargs) %}
 (function() {
-    var karte = {{ this.karte }};
+    var karte = {{ this._parent.get_name() }};
     var slanis = L.geoJSON({{ this.dati }}, {
         style: function(f) { return f.properties.stils; },
         onEachFeature: function(f, layer) {
@@ -367,6 +405,9 @@ _STILS = """
   font: 600 11px/1.2 system-ui, sans-serif; padding: 1px 4px; color: #111;}
 .karte-etikete:before {display: none;}
 .leaflet-draw-tooltip {font-size: 12px;}
+.seg-garums span {background: rgba(17,24,39,.82); color: #fff; font: 600 11px/1 system-ui, sans-serif;
+  padding: 2px 4px; border-radius: 3px; white-space: nowrap; transform: translate(-50%, -50%);
+  display: inline-block;}
 .nog-etikete {background: transparent; border: 0; box-shadow: none; color: #fff;
   font: 700 11px/1 system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; padding: 0;}
 .nog-etikete:before {display: none;}
@@ -387,7 +428,8 @@ def _elements(template: Template, **kw) -> MacroElement:
 def _etikete(o: dict) -> str:
     m = mervienibas(o["geometry"])
     if ir_laukums(o):
-        mers = f"{m['platiba_ha']:.2f} ha"
+        p = m["garums_m"]
+        mers = f"{m['platiba_ha']:.2f} ha · " + (f"{p:.0f} m" if p < 1000 else f"{p / 1000:.2f} km")
     elif o["geometry"]["type"] == "LineString":
         mers = f"{m['garums_m']:.0f} m"
     else:
@@ -438,8 +480,11 @@ def _nogabalu_slanis() -> dict:
         if n is None:
             continue
         v0 = sakotnejie.get(apz)
-        if apz in uzmerits:
+        if apz in uzmerits and v0 is not None and v0.atlauta_kailcirte:
             stils = {"color": "#ffffff", "weight": 2.5, "fillColor": "#e5484d", "fillOpacity": 0.12}
+        elif apz in uzmerits:     # atzīmēts, bet neatbilst kailcirtei
+            stils = {"color": "#f59e0b", "weight": 2.5, "dashArray": "2 4", "fillOpacity": 0.05,
+                     "fillColor": "#f59e0b"}
         elif v0 is not None and v0.atlauta_kailcirte:
             stils = {"color": "#4ade80", "weight": 2.5, "dashArray": "6 4", "fillOpacity": 0.05,
                      "fillColor": "#4ade80"}
@@ -468,14 +513,14 @@ def uzbuvet_karti() -> folium.Map:
             attr=VZD_ATRIBUCIJA,
         ).add_to(m)
     if inv and nog_robezas:
-        m.add_child(_elements(_NOGABALI_JS, karte=m.get_name(),
+        m.add_child(_elements(_NOGABALI_JS,
                               dati=json.dumps(_nogabalu_slanis(), ensure_ascii=False)))
     fg = folium.FeatureGroup(name="Objekti", control=False).add_to(m)
     dati = uz_geojson(objekti, ar_merijumiem=False)
     for f, o in zip(dati["features"], objekti):
         f["properties"]["etikete"] = _etikete(o)
     m.add_child(_elements(_OBJEKTI_JS, dati=json.dumps(dati, ensure_ascii=False),
-                          fg=fg.get_name(), karte=m.get_name(),
+                          fg_el=fg,
                           pastavigi="true" if uzraksti else "false"))
     m.add_child(_elements(_LATVISKI_JS))
     plugins.Draw(
@@ -489,7 +534,10 @@ def uzbuvet_karti() -> folium.Map:
                           "shapeOptions": {"color": STATUSI["Kailcirte"], "weight": 2.5}},
             "circle": False, "circlemarker": False, "marker": True,
         },
-        edit_options={"edit": True, "remove": True},
+        # "edit": True (bool) Leaflet.draw 1.0.x nesaprot -> virsotnes netiek rādītas; jādod objekts
+        edit_options={"edit": {"selectedPathOptions": {"maintainColor": True, "dashArray": "6, 6",
+                                                       "fill": True, "fillOpacity": 0.15}},
+                      "remove": True, "poly": {"allowIntersection": False}},
     ).add_to(m)
     plugins.MeasureControl(position="topleft", primary_length_unit="meters",
                            secondary_length_unit="kilometers", primary_area_unit="hectares",
@@ -504,7 +552,7 @@ def uzbuvet_karti() -> folium.Map:
         folium.Marker(ss.karte_markieris, tooltip="Meklētā vieta",
                       icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
     if ss.karte_pietuvinat_html and (objekti or ss.karte_zv):
-        fokuss = ss.get("karte_fokuss")
+        fokuss = ss.get("karte_fokuss_html")
         merkis = ([z for z in ss.karte_zv if z["kadastrs"] in fokuss] if fokuss else []) \
             or objekti + ss.karte_zv
         m.fit_bounds(robezas(merkis), padding=(30, 30), max_zoom=17)
@@ -536,7 +584,7 @@ def kartes_fragments() -> None:
 
 k1, k2, k3 = st.columns([1, 1, 4])
 if k1.button("🔍 Pietuvināt objektiem", disabled=not (objekti or ss.karte_zv), use_container_width=True):
-    ss.karte_fokuss = None
+    ss.karte_fokuss = ss.karte_fokuss_html = None
     _mainits(pietuvinat=True)
 if k2.button("🗑 Notīrīt visu", disabled=not objekti, use_container_width=True):
     ss.karte_objekti, ss.karte_importeti = [], set()
@@ -755,6 +803,7 @@ else:
                        use_container_width=True)
 
 # --- Pārrēķins ------------------------------------------------------------------
+ss.karte_aprekins = None
 if inv and objekti:
     st.subheader("Cirsmas aprēķins pēc kartes")
     if not uzmerits:
@@ -766,10 +815,15 @@ if inv and objekti:
         ir_pdf = inv is inv_pdf
         pdf_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest() if ir_pdf else None
         esosie = ss.labojumi if ir_pdf and ss.get("faila_id") == pdf_id else {}
-        tikai = st.toggle("Cirsmā tikai kartē atzīmētie nogabali", value=True,
+        t1, t2 = st.columns(2)
+        tikai = t1.toggle("Cirsmā tikai kartē atzīmētie nogabali", value=True,
                           help="Ieslēgts: nogabali bez kailcirtes laukuma kartē netiek cirsti. "
                                "Izslēgts: pārējiem paliek sistēmas lēmums pēc kailcirtes kritērijiem.")
-        s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai, nogabalu_robezas=nog_robezas)
+        visi = t2.toggle("Iekļaut arī kailcirtei neatbilstošos", value=False,
+                         help="Izslēgts: kartē atzīmētas jaunaudzes u.c. neatbilstoši nogabali cirsmā "
+                              "netiek iekļauti (tabulā atzīmēti ar ⚠). Ieslēgts: tiek iekļauti visi atzīmētie.")
+        s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai, nogabalu_robezas=nog_robezas,
+                       ieklaut_neatbilstosos=visi)
         uz = "inventarizāciju" if ir_pdf else "reģistra platībām"
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Cirsmas platība", f"{sum(uzmerits.values()):.2f} ha")
@@ -789,8 +843,24 @@ if inv and objekti:
         st.caption("Aprēķinā noklusējuma sortimentu cenas un izdevumi (kā Meža inventarizācijas sadaļā). "
                    "Apjoms = krāja m³/ha × uzmērītā platība; sugu proporcijas saglabājas.")
 
-        jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai, nog_robezas)
+        jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai, nog_robezas, visi)
         v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie)
+        # Momentuzņēmums kalkulatoram ("Aprēķins no kartes" Meža inventarizācijas sadaļā)
+        zimejums = json.dumps([[o["geometry"], o["statuss"], o.get("nogabals")] for o in objekti],
+                              sort_keys=True) + str(tikai) + str(visi) + (inv.zemes_vieniba or "") + str(ir_pdf)
+        ss.karte_aprekins = {
+            "id": "karte_" + hashlib.sha1(zimejums.encode()).hexdigest()[:12],
+            "inv": inv, "labojumi": jaunie, "uzmerits": dict(uzmerits),
+            "apraksts": f"Zemes vienība {inv.zemes_vieniba or aktiva_zv or '—'} · dati: "
+                        + (f"PDF {ss.inv_pdf['nosaukums']}" if ir_pdf else "Meža valsts reģistrs"),
+        }
+
+        def _uz_kalkulatoru() -> None:
+            ss.mezs_uz_karti = True
+
+        if st.button("🧮 Atvērt kalkulatorā (cenas, sortimenti, atskaites)", type="primary",
+                     on_click=_uz_kalkulatoru, use_container_width=True):
+            st.switch_page("views/mezs.py")
         p1, p2 = st.columns(2)
         xlsx = os.path.join(tempfile.gettempdir(),
                             f"karte_{hashlib.sha1(json.dumps(uz_geojson(objekti, False)).encode()).hexdigest()[:10]}.xlsx")

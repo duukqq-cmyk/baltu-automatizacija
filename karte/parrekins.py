@@ -13,6 +13,7 @@ from dataclasses import dataclass
 
 from cirsma.labojumi import Labojums, nogabala_atslega, novertet_ar_labojumiem
 from cirsma.parser import Inventarizacija
+from cirsma.rules import novertet_nogabalu
 from cirsma.sortiment import FinansuRezultats, aprekinat, vertejuma_apjoms
 
 from .geometrija import ir_laukums, lks_geometrija, mervienibas
@@ -79,8 +80,14 @@ def labojumi_no_kartes(
     esosie: dict[str, Labojums] | None = None,
     tikai_atzimetie: bool = True,
     nogabalu_robezas: dict[str, dict] | None = None,
+    ieklaut_neatbilstosos: bool = False,
 ) -> dict[str, Labojums]:
-    """Esošie labojumi + kartes uzmērījumi (platība, iekļaušana cirsmā)."""
+    """Esošie labojumi + kartes uzmērījumi (platība, iekļaušana cirsmā).
+
+    Kartē atzīmēts nogabals cirsmā tiek iekļauts tikai tad, ja tas atbilst kailcirtes
+    kritērijiem (vai `ieklaut_neatbilstosos`) — citādi, piem., zīmējot visu zemes
+    vienību, cirsmā nonāktu arī jaunaudzes.
+    """
     labojumi = copy.deepcopy(esosie or {})
     platibas = uzmeritas_platibas(objekti, nogabalu_robezas)
     for i, n in enumerate(inv.nogabali):
@@ -88,7 +95,9 @@ def labojumi_no_kartes(
         if n.apzimejums in platibas:
             lab = labojumi.setdefault(atsl, Labojums())
             lab.platiba_ha = platibas[n.apzimejums]
-            lab.kailcirte = True
+            v = novertet_nogabalu(n)
+            atbilst = bool(v and v.atlauta_kailcirte)
+            lab.kailcirte = True if (atbilst or ieklaut_neatbilstosos) else False
             lab.apjoms_m3 = None          # apjoms jāpārrēķina no jaunās platības
         elif tikai_atzimetie:
             lab = labojumi.setdefault(atsl, Labojums())
@@ -99,6 +108,8 @@ def labojumi_no_kartes(
 def _piezime(v, atzimets: bool) -> str:
     if not atzimets and not v.atlauta_kailcirte:
         return "Nav atzīmēts kartē — izslēgts no cirsmas"
+    if atzimets and not v.atlauta_kailcirte:
+        return "⚠ Atzīmēts kartē, bet neatbilst kailcirtes kritērijiem — cirsmā nav iekļauts"
     if atzimets and "pēc kritērijiem neatbilst" in v.pamatojums:
         return "⚠ Atzīmēts kartē, bet pēc kailcirtes kritērijiem neatbilst: " + \
             v.pamatojums.split("neatbilst:", 1)[-1].rstrip(")").strip()
@@ -118,11 +129,13 @@ def salidzinat(
     esosie: dict[str, Labojums] | None = None,
     tikai_atzimetie: bool = True,
     nogabalu_robezas: dict[str, dict] | None = None,
+    ieklaut_neatbilstosos: bool = False,
     **aprekina_parametri,
 ) -> Salidzinajums:
     """Aprēķins pirms (PDF + esošie labojumi) un pēc kartes uzmērījumiem."""
     v_pirms = novertet_ar_labojumiem(inv.nogabali, esosie or {})
-    jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai_atzimetie, nogabalu_robezas)
+    jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai_atzimetie, nogabalu_robezas,
+                                ieklaut_neatbilstosos)
     v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie)
     fin_pirms = aprekinat(v_pirms, **aprekina_parametri)
     fin_pec = aprekinat(v_pec, **aprekina_parametri)
