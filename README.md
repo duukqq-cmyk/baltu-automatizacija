@@ -163,6 +163,11 @@ Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
   bezmākoņu attēls, topokarte 1:10 000, OSM; pārklājumi — LiDAR veģetācijas augstuma modelis
   (arī izlīdzināts), VMD mežaudžu plāns (nogabali), kadastra karte, vējgāzes pēc 2026.08.22. vētras,
   LVM meža ceļi/grāvji, augsnes, horizontāles.
+- **Meklēšana pēc kadastra** (`karte/kadastrs.py`) — ievadi zemes vienības kadastra apzīmējumu
+  (11 cipari, var vairākus): robeža no VZD "Kadastrālie zemes gabali (INSPIRE)" WFS (CC BY 4.0,
+  atjauno reizi nedēļā) tiek iezīmēta kartē, karte pietuvinās un ieslēdzas VMD nogabalu slānis.
+  Ielādējot inventarizācijas PDF, tā zemes vienība tiek atrasta automātiski. Rāda reģistrēto un
+  grafisko (LKS-92) platību; robežu var pievienot kā objektu.
 - **Zīmēšana un mērījumi** — laukumi, līnijas, taisnstūri, punkti (Leaflet.draw, latviski), robežu
   labošana un dzēšana, ātrais mērīšanas rīks, GPS atrašanās vieta, pāreja uz WGS84 / LKS-92 koordinātām.
   Platības un garumi tiek rēķināti **LKS-92 / TM (EPSG:3059)**; pārklāšanās tiek atzīmēta.

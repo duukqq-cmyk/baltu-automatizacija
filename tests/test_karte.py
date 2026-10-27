@@ -134,3 +134,57 @@ def test_parrekins_pec_kartes():
     s2 = salidzinat(inv, [o], tikai_atzimetie=False)
     assert s2.pec.kopejais_m3 == pytest.approx(
         s.pirms.kopejais_m3 - rinda["Apjoms pirms m³"] + rinda["Apjoms pēc m³"], abs=1)
+
+
+# --- Kadastra meklēšana (VZD INSPIRE WFS) ---------------------------------------
+
+KAD_FIX = os.path.join(os.path.dirname(__file__), "dati", "kadastrs_64560020029.json")
+
+
+def test_apzimejumi_no_teksta():
+    from karte.kadastrs import apzimejumi
+    assert apzimejumi("8064 001 0066") == ["80640010066"]
+    assert apzimejumi("80640010066, 80440060026; 80640010066") == ["80640010066", "80440060026"]
+    assert apzimejumi("8064001006680440060026") == ["80640010066", "80440060026"]
+    assert apzimejumi("123") == []
+
+
+def test_kadastrs_atbilde_un_platiba():
+    from karte.kadastrs import parset_atbildi
+    with open(KAD_FIX, encoding="utf-8") as f:
+        zv = parset_atbildi(json.load(f))
+    assert len(zv) == 1 and zv[0]["kadastrs"] == "64560020029"
+    assert zv[0]["platiba_ha"] == pytest.approx(10.6)
+    assert "kadastrs.lv" in zv[0]["saite"]
+    # Grafiskā platība (LKS-92) var atšķirties no kadastrā reģistrētās — šeit 10.35 pret 10.6 ha
+    assert zv[0]["platiba_graf_ha"] == pytest.approx(10.35, abs=0.01)
+
+
+def test_kadastrs_rezerves_serviss(monkeypatch):
+    import io
+    import karte.kadastrs as k
+    with open(KAD_FIX, "rb") as f:
+        saturs = f.read()
+    izsaukumi = []
+
+    class Atbilde(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(req, timeout):
+        izsaukumi.append(req.full_url)
+        if len(izsaukumi) == 1:
+            raise OSError("nav savienojuma")
+        return Atbilde(saturs)
+
+    monkeypatch.setattr(k.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(k, "WFS_ADRESES", ["https://a.example/wfs", "https://b.example/wfs"])
+    zv = k.atrast(["64560020029", "99999999999"])
+    assert [z["kadastrs"] for z in zv] == ["64560020029"]
+    assert "featureID=CP64560020029,CP99999999999" in izsaukumi[1]
+    monkeypatch.setattr(k.urllib.request, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("x")))
+    with pytest.raises(k.KadastrsKluda):
+        k.atrast(["64560020029"])

@@ -19,9 +19,10 @@ from cirsma.labojumi import novertet_ar_labojumiem
 from cirsma.parser import parse_inventory_pdf
 from cirsma.report import excel_atskaite
 from karte.geometrija import (
-    STATUSI, apvienot_ar_zimejumiem, ir_laukums, kopplatiba_ha, lks_uz_wgs, mervienibas,
+    STATUSI, apvienot_ar_zimejumiem, ir_laukums, jauns_objekts, kopplatiba_ha, lks_uz_wgs, mervienibas,
     nolasit_failu, objekta_krasa, parklasanas, robezas, uz_geojson, uz_kml,
 )
+from karte.kadastrs import ATRIBUCIJA as VZD_ATRIBUCIJA, KadastrsKluda, apzimejumi, atrast
 from karte.parrekins import labojumi_no_kartes, nogabalu_saraksts, salidzinat
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
@@ -34,6 +35,12 @@ ss.setdefault("karte_pietuvinat", False)
 ss.setdefault("karte_versija", 0)
 ss.setdefault("karte_pedejie_zim", None)
 ss.setdefault("karte_importeti", set())
+ss.setdefault("karte_zv", [])            # atrastās zemes vienības (VZD)
+ss.setdefault("karte_zv_zina", None)
+ss.setdefault("karte_fokuss", None)
+ss.setdefault("karte_parklajumi", list(NOKLUSETIE_PARKLAJUMI))
+if ss.pop("karte_ieslegt_nogabalus", False):
+    ss.karte_parklajumi = list(dict.fromkeys(list(ss.karte_parklajumi) + ["Mežaudžu plāns (VMD nogabali)"]))
 
 
 # Karte tiek pārzīmēta (HTML mainās) tikai pilnā lapas pārlādē. Pārvietojot karti, fragments
@@ -48,12 +55,73 @@ def _mainits(pietuvinat: bool = False) -> None:
         ss.karte_pietuvinat = ss.karte_pietuvinat_html = True
 
 
+def _meklet_kadastru(kodi: list[str] | None = None) -> None:
+    """Atrod zemes vienības VZD servisā, parāda kartē un ieslēdz nogabalu slāni."""
+    kodi = kodi if kodi is not None else apzimejumi(ss.get("karte_kad_ievade", ""))
+    if not kodi:
+        ss.karte_zv_zina = ("error", "Ievadi 11 ciparu kadastra apzīmējumu, piem., 80640010066.")
+        return
+    try:
+        atrasti = atrast(kodi)
+    except KadastrsKluda as e:
+        ss.karte_zv_zina = ("error", str(e))
+        return
+    esosie = {z["kadastrs"] for z in ss.karte_zv}
+    ss.karte_zv = ss.karte_zv + [z for z in atrasti if z["kadastrs"] not in esosie]
+    neatrasti = [k for k in kodi if k not in {z["kadastrs"] for z in atrasti}]
+    ss.karte_zv_zina = (("warning", "Nav atrasta zemes vienība: " + ", ".join(neatrasti)
+                         + ". Ja tas ir īpašuma numurs, kadastrs.lv apskaties tā zemes vienību apzīmējumus.")
+                        if neatrasti else None)
+    if atrasti:
+        ss.karte_ieslegt_nogabalus = True      # slāni ieslēdz nākamajā pārlādē (pirms logrīka)
+        ss.karte_fokuss = [z["kadastrs"] for z in atrasti]
+        _mainits(pietuvinat=True)
+
+
+def _nonemt_zv(kadastrs: str) -> None:
+    ss.karte_zv = [z for z in ss.karte_zv if z["kadastrs"] != kadastrs]
+    _mainits()
+
+
+def _zv_ka_objekts(kadastrs: str) -> None:
+    z = next(z for z in ss.karte_zv if z["kadastrs"] == kadastrs)
+    g = z["geometry"]
+    poligoni = g["coordinates"] if g["type"] == "MultiPolygon" else [g["coordinates"]]
+    for i, c in enumerate(poligoni):
+        nos = f"ZV {kadastrs}" + (f" ({i + 1})" if len(poligoni) > 1 else "")
+        geom = {"type": "Polygon", "coordinates": [[[round(x, 6), round(y, 6)] for x, y, *_ in r] for r in c]}
+        ss.karte_objekti = ss.karte_objekti + [jauns_objekts(geom, nos, statuss="Cits")]
+    _mainits()
+
+
+# --- Sānjosla: kadastrs -----------------------------------------------------
+st.sidebar.header("Meklēt pēc kadastra")
+st.sidebar.text_input("Zemes vienības kadastra apzīmējums", key="karte_kad_ievade",
+                      placeholder="piem., 80640010066",
+                      help="11 cipari (atstarpes nav svarīgas). Vairākus atdali ar komatu. "
+                           "Dati: VZD Kadastrālie zemes gabali (INSPIRE), atjauno reizi nedēļā.")
+st.sidebar.button("🔎 Atrast kartē", on_click=_meklet_kadastru, use_container_width=True, type="primary")
+if ss.karte_zv_zina:
+    getattr(st.sidebar, ss.karte_zv_zina[0])(ss.karte_zv_zina[1])
+for z in ss.karte_zv:
+    with st.sidebar.container(border=True):
+        st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · {z['platiba_ha'] or 0:.2f} ha",
+                    help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
+                         f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
+        b, c = st.columns(2)
+        b.button("Kā objekts", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
+                 args=(z["kadastrs"],), use_container_width=True,
+                 help="Pievienot zemes vienības robežu kā objektu (mērījumiem, eksportam)")
+        c.button("Noņemt", key=f"zv_del_{z['kadastrs']}", on_click=_nonemt_zv, args=(z["kadastrs"],),
+                 use_container_width=True)
+
 # --- Sānjosla: slāņi --------------------------------------------------------
+st.sidebar.divider()
 st.sidebar.header("Kartes slāņi")
 pamatkarte = st.sidebar.radio("Pamatkarte", list(PAMATKARTES), key="karte_pamats",
                               help="\n\n".join(f"**{k}** — {s.apraksts}" for k, s in PAMATKARTES.items()))
 parklajumi = st.sidebar.multiselect(
-    "Pārklājumi", list(PARKLAJUMI), default=NOKLUSETIE_PARKLAJUMI, key="karte_parklajumi",
+    "Pārklājumi", list(PARKLAJUMI), key="karte_parklajumi",
     help="\n\n".join(f"**{k}** — {s.apraksts}" for k, s in PARKLAJUMI.items()))
 caurspidigums = st.sidebar.slider("Pārklājumu necaurspīdīgums", 0.1, 1.0, 0.6, 0.05,
                                   key="karte_opacity")
@@ -76,7 +144,7 @@ if st.sidebar.button("Rādīt kartē", use_container_width=True, disabled=not vi
             e, n = (a, b) if (a > 440_000 or b < 300_000) else (b, a)
             lat, lon = lks_uz_wgs(e, n)
         ss.karte_skats = ss.karte_skats_html = {"center": [lat, lon], "zoom": 16}
-        ss.karte_marķieris = [lat, lon]
+        ss.karte_markieris = [lat, lon]
         ss.karte_pietuvinat = ss.karte_pietuvinat_html = False
         _mainits()
     else:
@@ -220,6 +288,14 @@ def uzbuvet_karti() -> folium.Map:
         _wms(PARKLAJUMI[nos], caurspidigums, overlay=True).add_to(m)
 
     m.get_root().header.add_child(folium.Element(_STILS))
+    for z in ss.karte_zv:
+        folium.GeoJson(
+            {"type": "Feature", "geometry": z["geometry"], "properties": {}},
+            style_function=lambda _f: {"color": "#facc15", "weight": 3.5, "dashArray": "8 5",
+                                       "fill": False, "opacity": 1},
+            tooltip=f"Zemes vienība {z['kadastrs']}" + (f" · {z['platiba_ha']:.2f} ha" if z["platiba_ha"] else ""),
+            attr=VZD_ATRIBUCIJA,
+        ).add_to(m)
     fg = folium.FeatureGroup(name="Objekti", control=False).add_to(m)
     dati = uz_geojson(objekti, ar_merijumiem=False)
     for f, o in zip(dati["features"], objekti):
@@ -250,11 +326,14 @@ def uzbuvet_karti() -> folium.Map:
                           flyTo=True, keepCurrentZoomLevel=False).add_to(m)
     plugins.MousePosition(position="bottomleft", separator=" , ", prefix="WGS84:",
                           num_digits=6).add_to(m)
-    if ss.get("karte_marķieris"):
-        folium.Marker(ss.karte_marķieris, tooltip="Meklētā vieta",
+    if ss.get("karte_markieris"):
+        folium.Marker(ss.karte_markieris, tooltip="Meklētā vieta",
                       icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
-    if ss.karte_pietuvinat_html and objekti:
-        m.fit_bounds(robezas(objekti), padding=(30, 30), max_zoom=17)
+    if ss.karte_pietuvinat_html and (objekti or ss.karte_zv):
+        fokuss = ss.get("karte_fokuss")
+        merkis = ([z for z in ss.karte_zv if z["kadastrs"] in fokuss] if fokuss else []) \
+            or objekti + ss.karte_zv
+        m.fit_bounds(robezas(merkis), padding=(30, 30), max_zoom=17)
     return m
 
 
@@ -269,6 +348,7 @@ def kartes_fragments() -> None:
         c = rez["center"]
         ss.karte_skats = {"center": [c["lat"], c["lng"]], "zoom": rez["zoom"]}
         ss.karte_pietuvinat = False
+        ss.karte_fokuss = None
     zim = rez.get("all_drawings")
     if zim is None or zim == ss.karte_pedejie_zim:
         return
@@ -281,7 +361,8 @@ def kartes_fragments() -> None:
 
 
 k1, k2, k3 = st.columns([1, 1, 4])
-if k1.button("🔍 Pietuvināt objektiem", disabled=not objekti, use_container_width=True):
+if k1.button("🔍 Pietuvināt objektiem", disabled=not (objekti or ss.karte_zv), use_container_width=True):
+    ss.karte_fokuss = None
     _mainits(pietuvinat=True)
 if k2.button("🗑 Notīrīt visu", disabled=not objekti, use_container_width=True):
     ss.karte_objekti, ss.karte_importeti = [], set()
@@ -315,7 +396,21 @@ with st.expander("🌲 Nogabalu dati pārrēķinam (inventarizācijas PDF)",
         try:
             inv = _nolasit_pdf(ss.inv_pdf["baiti"])
             st.caption(f"Ielādēts: **{ss.inv_pdf['nosaukums']}** · {inv.avots} · NĪ {inv.ipasums or '—'} · "
-                       f"{len(inv.nogabali)} nogabali (to pašu failu redz arī Meža inventarizācijas sadaļa).")
+                       f"zemes vienība {inv.zemes_vieniba or '—'} · {len(inv.nogabali)} nogabali "
+                       "(to pašu failu redz arī Meža inventarizācijas sadaļa).")
+            pdf_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest()
+            if inv.zemes_vieniba and ss.get("karte_pdf_meklets") != pdf_id:
+                # Jauns PDF -> automātiski atrod tā zemes vienību kartē
+                ss.karte_pdf_meklets = pdf_id
+                if inv.zemes_vieniba not in {z["kadastrs"] for z in ss.karte_zv}:
+                    _meklet_kadastru([inv.zemes_vieniba])
+                    st.rerun()
+            zv = next((z for z in ss.karte_zv if z["kadastrs"] == inv.zemes_vieniba), None)
+            if zv and zv["platiba_ha"]:
+                kopa = sum(n.platiba_ha for n in inv.nogabali)
+                st.caption(f"📍 Zemes vienība {zv['kadastrs']} atzīmēta kartē (dzeltena svītrlīnija): "
+                           f"kadastrā {zv['platiba_ha']:.2f} ha, pēc robežām {zv['platiba_graf_ha']:.2f} ha, "
+                           f"nogabalu kopplatība PDF {kopa:.2f} ha.")
         except Exception as e:  # noqa: BLE001
             st.error(f"Neizdevās nolasīt PDF: {e}")
     else:
@@ -480,4 +575,4 @@ if inv and objekti:
 
 st.divider()
 st.caption("Kartes dati: LVM GEO brīvpieejas WMS (ortofoto, LiDAR veģetācijas augstums — LĢIA; "
-           "mežaudžu plāns — VMD; kadastrs — VZD). Platības rēķinātas LKS-92 / TM (EPSG:3059).")
+           "mežaudžu plāns — VMD; kadastrs — VZD); zemes vienību robežas — VZD INSPIRE WFS (CC BY 4.0). Platības rēķinātas LKS-92 / TM (EPSG:3059).")
