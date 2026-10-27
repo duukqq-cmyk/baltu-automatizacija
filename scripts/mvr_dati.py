@@ -21,6 +21,7 @@ import urllib.request
 from collections import defaultdict
 from datetime import datetime, timezone
 
+import numpy as np
 import pandas as pd
 import pyogrio
 import shapely
@@ -69,7 +70,7 @@ def main(izvade: str) -> None:
             df = pyogrio.read_dataframe(shp, columns=lauki, use_arrow=True)
             df = df[df["kadastrs"].notna() & (df["kadastrs"].astype(str).str.len() >= 4)]
             df = df.to_crs(4326)
-            geom = shapely.set_precision(df.geometry.values, 1e-6)
+            geom = shapely.transform(np.asarray(df.geometry.values), lambda c: np.round(c, 6))
             out = pd.DataFrame(df.drop(columns="geometry"))
             out["kadastrs"] = out["kadastrs"].astype(str).str.strip()
             out["geom"] = shapely.to_wkb(geom)
