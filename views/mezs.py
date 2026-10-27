@@ -252,9 +252,9 @@ with st.expander("Sortimentu aprēķina detaļas"):
     st.dataframe(pd.DataFrame(fin.detalas), use_container_width=True, hide_index=True)
 
 # --- Lejupielādes ----------------------------------------------------------
-st.subheader("Gala atskaite")
 atskaite = teksta_atskaite(inv, vertejumi, fin)
-st.code(atskaite, language=None)
+with st.expander("Gala atskaite", expanded=False):
+    st.code(atskaite, language=None)
 
 xlsx_cels = cels.replace(".pdf", "_atskaite.xlsx")
 excel_atskaite(xlsx_cels, inv, vertejumi, fin)
