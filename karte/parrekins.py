@@ -15,7 +15,7 @@ from cirsma.labojumi import Labojums, nogabala_atslega, novertet_ar_labojumiem
 from cirsma.parser import Inventarizacija
 from cirsma.sortiment import FinansuRezultats, aprekinat, vertejuma_apjoms
 
-from .geometrija import ir_laukums, mervienibas
+from .geometrija import ir_laukums, lks_geometrija, mervienibas
 
 CIRSMAS_STATUSS = "Kailcirte"
 
@@ -35,13 +35,42 @@ def nogabalu_saraksts(inv: Inventarizacija) -> dict[str, str]:
     return rez
 
 
-def uzmeritas_platibas(objekti: list[dict]) -> dict[str, float]:
-    """Nogabala apzīmējums -> kartē uzmērītā cirsmas platība (ha)."""
+MIN_DALA_HA = 0.01        # mazākas pārklāšanās ar nogabalu ir zīmēšanas neprecizitāte
+MIN_DALA_PROC = 0.02      # ... vai < 2 % no nogabala platības
+
+
+def uzmeritas_platibas(objekti: list[dict], nogabalu_robezas: dict[str, dict] | None = None,
+                       ) -> dict[str, float]:
+    """Nogabala apzīmējums -> kartē uzmērītā cirsmas platība (ha).
+
+    Kailcirtes laukums ar manuāli piesaistītu nogabalu -> visa laukuma platība tam nogabalam.
+    Bez piesaistes, ja zināmas nogabalu robežas (MVR), laukumu automātiski sadala pa
+    nogabaliem pēc pārklāšanās (LKS-92), atmetot sīkas malu pārklāšanās.
+    """
     rez: dict[str, float] = {}
+    robezas_lks = {k: lks_geometrija(g) for k, g in (nogabalu_robezas or {}).items()}
     for o in objekti:
-        if o.get("nogabals") and o.get("statuss") == CIRSMAS_STATUSS and ir_laukums(o):
+        if o.get("statuss") != CIRSMAS_STATUSS or not ir_laukums(o):
+            continue
+        if o.get("nogabals"):
             rez[o["nogabals"]] = rez.get(o["nogabals"], 0.0) + mervienibas(o["geometry"])["platiba_ha"]
+            continue
+        if not robezas_lks:
+            continue
+        g = lks_geometrija(o["geometry"])
+        for apz, ng in robezas_lks.items():
+            if not g.intersects(ng):
+                continue
+            ha = g.intersection(ng).area / 10_000
+            if ha >= MIN_DALA_HA and ha >= MIN_DALA_PROC * ng.area / 10_000:
+                rez[apz] = rez.get(apz, 0.0) + ha
     return {k: round(v, 2) for k, v in rez.items()}
+
+
+def objekta_sadalijums(obj: dict, nogabalu_robezas: dict[str, dict]) -> dict[str, float]:
+    """Viena laukuma platība pa nogabaliem (tabulai)."""
+    o = dict(obj, statuss=CIRSMAS_STATUSS)
+    return uzmeritas_platibas([o], nogabalu_robezas)
 
 
 def labojumi_no_kartes(
@@ -49,10 +78,11 @@ def labojumi_no_kartes(
     objekti: list[dict],
     esosie: dict[str, Labojums] | None = None,
     tikai_atzimetie: bool = True,
+    nogabalu_robezas: dict[str, dict] | None = None,
 ) -> dict[str, Labojums]:
     """Esošie labojumi + kartes uzmērījumi (platība, iekļaušana cirsmā)."""
     labojumi = copy.deepcopy(esosie or {})
-    platibas = uzmeritas_platibas(objekti)
+    platibas = uzmeritas_platibas(objekti, nogabalu_robezas)
     for i, n in enumerate(inv.nogabali):
         atsl = nogabala_atslega(i)
         if n.apzimejums in platibas:
@@ -87,15 +117,16 @@ def salidzinat(
     objekti: list[dict],
     esosie: dict[str, Labojums] | None = None,
     tikai_atzimetie: bool = True,
+    nogabalu_robezas: dict[str, dict] | None = None,
     **aprekina_parametri,
 ) -> Salidzinajums:
     """Aprēķins pirms (PDF + esošie labojumi) un pēc kartes uzmērījumiem."""
     v_pirms = novertet_ar_labojumiem(inv.nogabali, esosie or {})
-    jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai_atzimetie)
+    jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai_atzimetie, nogabalu_robezas)
     v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie)
     fin_pirms = aprekinat(v_pirms, **aprekina_parametri)
     fin_pec = aprekinat(v_pec, **aprekina_parametri)
-    platibas = uzmeritas_platibas(objekti)
+    platibas = uzmeritas_platibas(objekti, nogabalu_robezas)
 
     pirms_pec_idx = {v.indekss: v for v in v_pirms}
     rindas = []
@@ -108,7 +139,7 @@ def salidzinat(
         apj_pec = vertejuma_apjoms(v)[0] if v.atlauta_kailcirte else 0.0
         rindas.append({
             "Nogabals": n.apzimejums,
-            "Platība PDF ha": n0.platiba_ha if n0 else None,
+            "Platība inventarizācijā ha": n0.platiba_ha if n0 else None,
             "Uzmērīts kartē ha": platibas.get(n.apzimejums),
             "Cirsmā pirms": bool(a and a.atlauta_kailcirte),
             "Cirsmā pēc": v.atlauta_kailcirte,
