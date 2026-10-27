@@ -162,7 +162,7 @@ for z in ss.karte_zv:
                         help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
                              f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
         b, c = st.columns(2)
-        b.button("✏️ Pārzīmēt", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
+        b.button("✏️ Zīmēt", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
                  args=(z["kadastrs"],), use_container_width=True,
                  help="Nokopē robežu kā labojamu cirsmu: kartē spied ✎, velc virsotnes — platība, "
                       "malu garumi un aprēķins atjaunojas.")
@@ -275,11 +275,18 @@ if mvr_df is not None and len(mvr_df):
     if inv is not None:
         nog_robezas = {k: g for k, g in nog_robezas.items() if k in {n.apzimejums for n in inv.nogabali}}
 
+ss.setdefault("karte_tikai", True)
+ss.setdefault("karte_visi", True)     # iezīmētais laukums vienmēr nonāk aprēķinā (ar ⚠, ja neatbilst)
 uzmerits = uzmeritas_platibas(objekti, nog_robezas) if inv else {}
 cirsmas_vertejumi = {}
+kartes_fin = None
 if inv:
-    _lab = labojumi_no_kartes(inv, objekti, None, tikai_atzimetie=bool(uzmerits), nogabalu_robezas=nog_robezas)
+    _lab = labojumi_no_kartes(inv, objekti, None, tikai_atzimetie=ss.karte_tikai and bool(uzmerits),
+                              nogabalu_robezas=nog_robezas, ieklaut_neatbilstosos=ss.karte_visi)
     cirsmas_vertejumi = {v.nogabals.apzimejums: v for v in novertet_ar_labojumiem(inv.nogabali, _lab)}
+    if uzmerits:
+        from cirsma.sortiment import aprekinat as _aprekinat
+        kartes_fin = _aprekinat(list(cirsmas_vertejumi.values()))
 sakotnejie = {n.apzimejums: novertet_nogabalu(n) for n in inv.nogabali} if inv else {}
 
 # --- Karte --------------------------------------------------------------------
@@ -637,6 +644,39 @@ k3.caption("Rīki kartes kreisajā pusē: ⬠ laukums · ╱ līnija · ▭ tais
 kartes_fragments()
 objekti = ss.karte_objekti
 
+# --- Tūlītējs rezultāts zem kartes ------------------------------------------------
+if objekti:
+    kc = [o for o in objekti if o.get("statuss") == CIRSMAS_STATUSS and ir_laukums(o)]
+    if not kc:
+        st.info("Uzzīmētajiem laukumiem nav statusa **Kailcirte** — tabulā zemāk nomaini statusu, "
+                "lai laukums nonāktu aprēķinā.")
+    elif inv is None:
+        st.warning("Aprēķinam vajag nogabalu datus: sānjoslā atrodi zemes vienību pēc kadastra "
+                   "apzīmējuma vai ielādē inventarizācijas PDF.")
+    elif not uzmerits:
+        st.warning("Iezīmētā cirsma nepārklājas ne ar vienu šīs zemes vienības nogabalu"
+                   + ("" if nog_robezas else " (nogabalu robežas nav zināmas — tabulā kolonnā "
+                      "**Nogabals** piesaisti laukumu nogabalam)") + ".")
+    elif kartes_fin is not None:
+        iezimets = kopplatiba_ha(kc)
+        uz_nog = sum(uzmerits.values())
+        with st.container(border=True):
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Iezīmētā cirsma", f"{iezimets:.2f} ha",
+                      help="Visu kailcirtes laukumu platība (LKS-92), pārklāšanās netiek skaitītas divreiz")
+            r2.metric("Cērtamais apjoms", f"{kartes_fin.kopejais_m3:,.0f} m³")
+            r3.metric("Max iegādes summa", f"{kartes_fin.max_iegades_summa:,.0f} EUR")
+            r4.metric("Cena", f"{kartes_fin.cena_eur_m3:.2f} €/m³")
+            st.caption("Pa nogabaliem: " + " · ".join(f"**{k}** {v:.2f} ha" for k, v in uzmerits.items()))
+            if iezimets - uz_nog >= 0.01:
+                st.caption(f"ℹ️ No iezīmētajiem {iezimets:.2f} ha uz meža nogabaliem ir {uz_nog:.2f} ha; "
+                           f"{iezimets - uz_nog:.2f} ha atrodas ārpus nogabaliem (ceļš, lauce, cita zeme vai "
+                           "kaimiņu zeme) un netiek vērtēti.")
+            neatb = [k for k in uzmerits if sakotnejie.get(k) is not None and not sakotnejie[k].atlauta_kailcirte]
+            if neatb:
+                st.caption("⚠ Kailcirtei neatbilst: " + ", ".join(neatb)
+                           + (" — iekļauti aprēķinā." if ss.karte_visi else " — aprēķinā nav iekļauti."))
+
 # --- Nogabali ------------------------------------------------------------------
 
 
@@ -857,12 +897,12 @@ if inv and objekti:
         pdf_id = hashlib.sha1(ss.inv_pdf["baiti"]).hexdigest() if ir_pdf else None
         esosie = ss.labojumi if ir_pdf and ss.get("faila_id") == pdf_id else {}
         t1, t2 = st.columns(2)
-        tikai = t1.toggle("Cirsmā tikai kartē atzīmētie nogabali", value=True,
+        tikai = t1.toggle("Cirsmā tikai kartē atzīmētie nogabali", key="karte_tikai",
                           help="Ieslēgts: nogabali bez kailcirtes laukuma kartē netiek cirsti. "
                                "Izslēgts: pārējiem paliek sistēmas lēmums pēc kailcirtes kritērijiem.")
-        visi = t2.toggle("Iekļaut arī kailcirtei neatbilstošos", value=False,
-                         help="Izslēgts: kartē atzīmētas jaunaudzes u.c. neatbilstoši nogabali cirsmā "
-                              "netiek iekļauti (tabulā atzīmēti ar ⚠). Ieslēgts: tiek iekļauti visi atzīmētie.")
+        visi = t2.toggle("Iekļaut arī kailcirtei neatbilstošos", key="karte_visi",
+                         help="Ieslēgts: viss, ko iezīmē kartē, nonāk aprēķinā (neatbilstošie atzīmēti ar ⚠). "
+                              "Izslēgts: jaunaudzes u.c. kailcirtei neatbilstoši nogabali netiek iekļauti.")
         s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai, nogabalu_robezas=nog_robezas,
                        ieklaut_neatbilstosos=visi)
         uz = "inventarizāciju" if ir_pdf else "reģistra platībām"
