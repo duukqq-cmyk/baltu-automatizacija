@@ -35,6 +35,13 @@ from karte.parrekins import (
 )
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
+# VZD proxy no Streamlit Secrets (drošībai arī tad, ja Secrets netiek padoti kā vides mainīgie)
+try:
+    if st.secrets.get("VZD_PROXY") and not os.environ.get("VZD_PROXY"):
+        os.environ["VZD_PROXY"] = str(st.secrets["VZD_PROXY"])
+except Exception:  # noqa: BLE001 — lokāli Secrets var nebūt
+    pass
+
 LATVIJA = {"center": [56.95, 24.6], "zoom": 8}
 AKCENTS = "#ff4b4b"      # aplikācijas pogu krāsa — līnijām un virsotnēm kartē
 
