@@ -36,6 +36,14 @@ PDF ──► parser.py ──► rules.py ──► sortiment.py ──► repo
    + Excel ar 3 lapām (kopsavilkums, nogabalu vērtējums ar pamatojumiem,
    sortimentu aprēķins).
 
+## 🧮 Cirsmas novērtējums (summu kalkulators)
+
+Trešais režīms lapā *Meža inventarizācija* (`views/novertejums.py`, loģika `cirsma/novertejums.py`).
+Ievelc vienu vai vairākus Mežvērtes **CIRSMAS NOVĒRTĒJUMS** PDF (viens fails = viens nogabals) →
+sistēma nolasa katru nogabalu un saskaita summas. Pēc noklusējuma rāda **nogabalu skaitu un platību**;
+ar ⚙️ var ieslēgt vērtības (kopā / cirsmas / biomasas, €/ha, €/m³), krājas, sortimentus, koku skaitu
+un sadalījumu pa sugām. Brīdina par dublikātiem un nesakrītošām PDF kontrolsummām; CSV eksports.
+
 ## Palaišana
 
 ```bash

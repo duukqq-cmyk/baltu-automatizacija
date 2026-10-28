@@ -62,11 +62,17 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
 
 st.title("🌲 Cirsmas vērtības aprēķins")
 AVOTS_PDF, AVOTS_KARTE = "📄 No inventarizācijas PDF", "🗺️ Aprēķins no kartes"
+AVOTS_NOVERTEJUMS = "🧮 Cirsmas novērtējums"
 if st.session_state.pop("mezs_uz_karti", False):
     st.session_state.mezs_avots = AVOTS_KARTE
 st.session_state.setdefault("mezs_avots", AVOTS_PDF)
-avots = st.segmented_control("Datu avots", [AVOTS_PDF, AVOTS_KARTE], key="mezs_avots",
-                             label_visibility="collapsed") or AVOTS_PDF
+avots = st.segmented_control("Datu avots", [AVOTS_PDF, AVOTS_KARTE, AVOTS_NOVERTEJUMS],
+                             key="mezs_avots", label_visibility="collapsed") or AVOTS_PDF
+if avots == AVOTS_NOVERTEJUMS:
+    # Atsevišķs summu kalkulators — sānjoslas cenas un inventarizācijas aprēķins te nav vajadzīgi
+    from views.novertejums import render as _novertejums_render
+    _novertejums_render()
+    st.stop()
 if avots == AVOTS_PDF:
     st.caption(
         "Augšupielādē nogabalu raksturojošo rādītāju PDF (VMD vai gabali.lv — formātu atpazīst "
