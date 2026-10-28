@@ -181,7 +181,8 @@ Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
   vienību, tiek ielādēti tās nogabali ar robežām un taksācijas datiem (formula, vecums, bonitāte,
   H, D, krāja) no VMD atvērtajiem datiem (CC0). GitHub Actions (`.github/workflows/mvr-dati.yml`)
   reizi ceturksnī lejupielādē reģistru (~650 MB) un publicē to Release `mvr-dati` kā mazus failus
-  `mvr_XXXX.parquet` pa kadastra teritorijām; aplikācija ielādē tikai vajadzīgo. Kartē nogabali
+  `mvr_XXXX.parquet` pa kadastra teritorijām; aplikācija ielādē tikai vajadzīgo. Ja repozitorijs ir
+  privāts, Streamlit Secrets jābūt `MVR_GITHUB_TOKEN` (fine-grained tokens ar *Contents: Read-only*). Kartē nogabali
   ir klikšķināmi (dati, kailcirtes atbilstība, uzmērītā platība); tabulā var atzīmēt nogabalus un
   ar vienu pogu iezīmēt tos kā cirsmu. Ja ielādēts inventarizācijas PDF, aprēķinā izmanto PDF
   datus, bet robežas — no reģistra.

@@ -7,8 +7,9 @@
 # Latvijas valsts / LVM domēniem (*.gov.lv, *.kadastrs.lv, *.geolatvija.lv, *.lvm.lv,
 # *.lvmgeo.lv). Pārbaudīts AlmaLinux 10 / RHEL saimei; strādā arī Ubuntu/Debian.
 #
-# Palaišana serverī (kā root):
+# Palaišana serverī (kā root), ja repozitorijs ir publisks:
 #   curl -fsSL https://raw.githubusercontent.com/duukqq-cmyk/baltu-automatizacija/main/scripts/proxy_uzstadit.sh | bash
+# Privātam repozitorijam: nokopē faila saturu serverī (piem., nano proxy_uzstadit.sh) un `bash proxy_uzstadit.sh`.
 #
 # Beigās skripts izdrukā rindu VZD_PROXY = "...", ko ieliek Streamlit -> Settings -> Secrets.
 # Atkārtota palaišana ģenerē jaunu paroli (vecā vairs nederēs).

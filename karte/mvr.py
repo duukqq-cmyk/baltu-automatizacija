@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import io
 import os
+import urllib.error
 import urllib.request
 
 import pandas as pd
@@ -44,15 +45,65 @@ class MvrKluda(Exception):
     """MVR datu fails nav pieejams."""
 
 
+REPO = os.environ.get("MVR_REPO", "duukqq-cmyk/baltu-automatizacija")
+RELEASE_TAG = "mvr-dati"
+
+
+def _token() -> str:
+    """GitHub tokens privātam repozitorijam (Streamlit Secrets: MVR_GITHUB_TOKEN)."""
+    return os.environ.get("MVR_GITHUB_TOKEN", "").strip()
+
+
+def _api(url: str, accept: str = "application/vnd.github+json", timeout: float = 60):
+    req = urllib.request.Request(url, headers={"Accept": accept, "User-Agent": "baltu-automatizacija"})
+    # Authorization netiek pārsūtīts uz pāradresēto S3 saiti (tā atsakās no otras autorizācijas)
+    req.add_unredirected_header("Authorization", f"Bearer {_token()}")
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
+_ASSETI: dict[str, int] | None = None
+
+
+def _asseti() -> dict[str, int]:
+    """Release failu nosaukums -> asset id (kešots procesā)."""
+    global _ASSETI
+    if _ASSETI is None:
+        import json
+        rez, lapa = {}, 1
+        with _api(f"https://api.github.com/repos/{REPO}/releases/tags/{RELEASE_TAG}") as r:
+            rid = json.load(r)["id"]
+        while True:
+            with _api(f"https://api.github.com/repos/{REPO}/releases/{rid}/assets?per_page=100&page={lapa}") as r:
+                dala = json.load(r)
+            rez.update({a["name"]: a["id"] for a in dala})
+            if len(dala) < 100:
+                break
+            lapa += 1
+        _ASSETI = rez
+    return _ASSETI
+
+
 def lejupieladet_teritoriju(prefikss: str, timeout: float = 60) -> bytes | None:
-    """Vienas kadastra teritorijas fails (None — teritorijā nav meža nogabalu)."""
+    """Vienas kadastra teritorijas fails (None — teritorijā nav meža nogabalu).
+
+    Publiskam repozitorijam — tieša Release saite; privātam (ja iestatīts
+    MVR_GITHUB_TOKEN) — caur GitHub API ar tokenu.
+    """
     try:
+        if _token():
+            aid = _asseti().get(f"mvr_{prefikss}.parquet")
+            if aid is None:
+                return None
+            with _api(f"https://api.github.com/repos/{REPO}/releases/assets/{aid}",
+                      accept="application/octet-stream", timeout=timeout) as r:
+                return r.read()
         with urllib.request.urlopen(MVR_URL.format(prefikss), timeout=timeout) as r:
             return r.read()
     except urllib.error.HTTPError as e:
-        if e.code == 404:
+        if e.code == 404 and not _token():
             return None
-        raise MvrKluda(f"MVR dati nav pieejami ({e})") from e
+        hint = " — pārbaudi MVR_GITHUB_TOKEN" if e.code in (401, 403, 404) and _token() else ""
+        raise MvrKluda(f"MVR dati nav pieejami (HTTP {e.code}{hint})") from e
     except Exception as e:  # noqa: BLE001
         raise MvrKluda(f"MVR dati nav pieejami ({e})") from e
 

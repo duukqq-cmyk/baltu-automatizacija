@@ -326,3 +326,38 @@ def test_vzd_proxy_no_vides(monkeypatch):
     with pytest.raises(k.KadastrsKluda) as e:
         k.atrast(["64560020029"])
     assert "slepens" not in str(e.value)
+
+
+def test_mvr_privats_repo_ar_tokenu(monkeypatch):
+    import io
+    import json as _json
+    import karte.mvr as m
+    monkeypatch.setenv("MVR_GITHUB_TOKEN", "tok")
+    monkeypatch.setattr(m, "_ASSETI", None)
+    pieprasijumi = []
+
+    class R(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(req, timeout):
+        pieprasijumi.append(req)
+        u = req.full_url
+        if u.endswith("/releases/tags/mvr-dati"):
+            return R(_json.dumps({"id": 7}).encode())
+        if "/releases/7/assets" in u:
+            return R(_json.dumps([{"name": "mvr_6456.parquet", "id": 42}]).encode())
+        if u.endswith("/releases/assets/42"):
+            return R(b"PARQUET")
+        raise AssertionError(u)
+
+    monkeypatch.setattr(m.urllib.request, "urlopen", urlopen)
+    assert m.lejupieladet_teritoriju("6456") == b"PARQUET"
+    assert m.lejupieladet_teritoriju("9999") is None
+    pedejais = pieprasijumi[-1] if pieprasijumi else None
+    assert pedejais.get_header("Accept") == "application/octet-stream"
+    # Tokens netiek pārsūtīts pāradresācijā (S3)
+    assert "Authorization" in pedejais.unredirected_hdrs and "Authorization" not in pedejais.headers
