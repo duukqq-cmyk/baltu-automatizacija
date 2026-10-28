@@ -188,6 +188,12 @@ Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
 - **Automātiska sadale pa nogabaliem** (`karte/parrekins.py`) — kailcirtes laukums tiek sadalīts
   pa nogabaliem pēc robežu pārklāšanās (LKS-92), sīkas malu pārklāšanās (< 0,01 ha vai < 2 %)
   tiek atmestas; manuāla piesaiste nogabalam ir noteicošā. Apjoms un summa pārrēķinās uzreiz.
+- **VZD piekļuve caur Latvijas serveri** — VZD datu servisi atbild tikai Latvijas IP adresēm
+  (pārbaudīts no ~50 valstu serveriem). Uz Latvijas VPS (Nano IT, Rīga) ar
+  `scripts/proxy_uzstadit.sh` tiek uzlikts Squid starpniekserveris ar paroli, kas laiž cauri tikai
+  HTTPS uz `*.gov.lv`, `*.kadastrs.lv`, `*.geolatvija.lv`, `*.lvm.lv`, `*.lvmgeo.lv`. Aplikācija to
+  izmanto, ja Streamlit Secrets ir `VZD_PROXY = "http://baltu:<parole>@<IP>:38129"`; bez tā
+  zemes vienību meklē pēc MVR nogabaliem (meža daļa).
 - **Zīmēšana un mērījumi** — laukumi, līnijas, taisnstūri, punkti (Leaflet.draw, latviski), robežu
   labošana un dzēšana, ātrais mērīšanas rīks, GPS atrašanās vieta, pāreja uz WGS84 / LKS-92 koordinātām.
   Platības un garumi tiek rēķināti **LKS-92 / TM (EPSG:3059)**; pārklāšanās tiek atzīmēta.

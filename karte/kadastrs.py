@@ -25,6 +25,20 @@ if os.environ.get("KADASTRS_WFS"):            # alternatīvs serviss (piem., tes
 ATRIBUCIJA = "Valsts zemes dienests, CC BY 4.0"
 
 
+def _atvertajs() -> urllib.request.OpenerDirector:
+    """VZD datu servisi atbild tikai Latvijas IP adresēm. Ja iestatīts VZD_PROXY
+    (Streamlit Secrets saknes atslēga -> vides mainīgais), pieprasījumi iet caur
+    starpniekserveri Latvijā, piem., "http://lietotajs:parole@185.72.86.90:38129"."""
+    proxy = os.environ.get("VZD_PROXY", "").strip()
+    if proxy:
+        return urllib.request.build_opener(urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+    return urllib.request.build_opener()
+
+
+def proxy_iestatits() -> bool:
+    return bool(os.environ.get("VZD_PROXY", "").strip())
+
+
 class KadastrsKluda(Exception):
     """Serviss nav sasniedzams vai atbilde nav nolasāma."""
 
@@ -77,14 +91,18 @@ def atrast(kodi: list[str], timeout: float = 20.0) -> list[dict]:
     if not kodi:
         return []
     pedeja_kluda = None
+    atvertajs = _atvertajs()
     for adrese in WFS_ADRESES:
         try:
             pieprasijums = urllib.request.Request(_vaicajums(adrese, kodi),
                                                   headers={"User-Agent": "baltu-automatizacija/1.0"})
-            with urllib.request.urlopen(pieprasijums, timeout=timeout) as r:
+            with atvertajs.open(pieprasijums, timeout=timeout) as r:
                 dati = json.loads(r.read().decode("utf-8"))
             atrasti = {z["kadastrs"]: z for z in parset_atbildi(dati)}
             return [atrasti[k] for k in kodi if k in atrasti]
         except Exception as e:  # noqa: BLE001 — mēģinām nākamo servisu
             pedeja_kluda = e
-    raise KadastrsKluda(f"VZD kadastra serviss nav pieejams ({pedeja_kluda})")
+    kluda = str(pedeja_kluda)
+    if proxy_iestatits():                       # nerādām paroli kļūdas tekstā
+        kluda = kluda.replace(os.environ["VZD_PROXY"], "VZD_PROXY")
+    raise KadastrsKluda(f"VZD kadastra serviss nav pieejams ({kluda})")

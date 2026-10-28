@@ -180,12 +180,16 @@ def test_kadastrs_rezerves_serviss(monkeypatch):
             raise OSError("nav savienojuma")
         return Atbilde(saturs)
 
-    monkeypatch.setattr(k.urllib.request, "urlopen", urlopen)
+    class Atvertajs:
+        def __init__(self, f):
+            self.open = f
+
+    monkeypatch.setattr(k, "_atvertajs", lambda: Atvertajs(urlopen))
     monkeypatch.setattr(k, "WFS_ADRESES", ["https://a.example/wfs", "https://b.example/wfs"])
     zv = k.atrast(["64560020029", "99999999999"])
     assert [z["kadastrs"] for z in zv] == ["64560020029"]
     assert "featureID=CP64560020029,CP99999999999" in izsaukumi[1]
-    monkeypatch.setattr(k.urllib.request, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(OSError("x")))
+    monkeypatch.setattr(k, "_atvertajs", lambda: Atvertajs(lambda *a, **kw: (_ for _ in ()).throw(OSError("x"))))
     with pytest.raises(k.KadastrsKluda):
         k.atrast(["64560020029"])
 
@@ -301,3 +305,24 @@ def test_visa_zemes_vieniba_bez_jaunaudzem():
     assert any(r["Piezīme"].startswith("⚠ Atzīmēts kartē") for r in s.rindas)
     s2 = salidzinat(inv, [o], nogabalu_robezas=rob, ieklaut_neatbilstosos=True)
     assert s2.pec.kopejais_m3 > s.pec.kopejais_m3
+
+
+def test_vzd_proxy_no_vides(monkeypatch):
+    import karte.kadastrs as k
+    monkeypatch.delenv("VZD_PROXY", raising=False)
+    assert not k.proxy_iestatits()
+    monkeypatch.setenv("VZD_PROXY", "http://baltu:slepens@185.72.86.90:38129")
+    assert k.proxy_iestatits()
+    ph = [h for h in k._atvertajs().handlers if isinstance(h, k.urllib.request.ProxyHandler)]
+    assert ph and ph[0].proxies["https"] == "http://baltu:slepens@185.72.86.90:38129"
+    # Kļūdas tekstā parole neparādās
+    monkeypatch.setattr(k, "WFS_ADRESES", ["https://a.example/wfs"])
+
+    class Kluda:
+        def open(self, *a, **kw):
+            raise OSError("proxy http://baltu:slepens@185.72.86.90:38129 refused")
+
+    monkeypatch.setattr(k, "_atvertajs", lambda: Kluda())
+    with pytest.raises(k.KadastrsKluda) as e:
+        k.atrast(["64560020029"])
+    assert "slepens" not in str(e.value)
