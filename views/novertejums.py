@@ -1,4 +1,4 @@
-"""UI: 🌲 Cirsmas novērtējums — summu kalkulators Mežvērtes cirsmas novērtējuma PDF.
+"""UI: 🧮 Cirsmas novērtējums — summu kalkulators cirsmas novērtējuma PDF.
 
 Nav atsevišķa lapa — to izsauc views/mezs.py kā trešo datu avota režīmu.
 """
@@ -10,7 +10,9 @@ import pandas as pd
 import streamlit as st
 
 from cirsma.novertejums import (
+    FORMATS_PARDODAMA,
     RADITAJI,
+    SUGU_SUMMEJAMAS,
     Novertejums,
     dublikati,
     fmt,
@@ -24,7 +26,7 @@ _SEC = list(RADITAJI)
 
 
 @st.cache_data(show_spinner=False)
-def _nolasit(dati: bytes, fails: str, _hash: str) -> Novertejums:
+def _nolasit(dati: bytes, fails: str, _hash: str) -> list[Novertejums]:
     return parse_novertejums_pdf(dati, fails)
 
 
@@ -58,9 +60,9 @@ def render() -> None:
     teksts, zobrats = st.columns([20, 1])
     with teksts:
         st.caption(
-            "Ievelc vienu vai vairākus Mežvērtes **cirsmas novērtējuma** PDF (viens fails = viens "
-            "nogabals). Sistēma saskaita nogabalus un platības; ar ⚙️ vari ieslēgt arī vērtības, "
-            "krājas, sortimentus u.c."
+            "Ievelc vienu vai vairākus **cirsmas novērtējuma** PDF — Mežvērtes (viens nogabals) vai "
+            "pārdodamo cirsmu (daudz cirsmu vienā PDF). Sistēma saskaita nogabalus un platības; "
+            "ar ⚙️ vari ieslēgt arī vērtības, krājas, sortimentus u.c."
         )
     with zobrats:
         raditaji = _iestatijumi()
@@ -75,7 +77,7 @@ def render() -> None:
     for f in faili:
         dati = f.getvalue()
         try:
-            novertejumi.append(_nolasit(dati, f.name, hashlib.md5(dati).hexdigest()))
+            novertejumi.extend(_nolasit(dati, f.name, hashlib.md5(dati).hexdigest()))
         except Exception as e:  # noqa: BLE001 — rādām lietotājam, turpinām ar pārējiem
             st.error(f"**{f.name}**: neizdevās nolasīt — {e}")
     if not novertejumi:
@@ -83,15 +85,22 @@ def render() -> None:
 
     dup = dublikati(novertejumi)
     if dup:
-        st.warning("Tas pats nogabals ielādēts vairākkārt (summās ieskaitīts katru reizi): "
+        st.warning("Tas pats nogabals ir vairākās cirsmās (summās ieskaitīts katru reizi): "
                    + "; ".join(dup))
     for n in novertejumi:
         for b in n.bridinajumi:
-            st.warning(f"**{n.fails}**: {b}")
+            st.warning(f"**{n.avots}**: {b}")
 
     novertejumi = kartot(novertejumi)
     rindas = [rindas_vertibas(n) for n in novertejumi]
     kop = kopsummas(rindas)
+
+    bez_eur = sum(1 for r in rindas if r["vertiba_kopa"] is None)
+    if bez_eur and any(RADITAJI[k].get("eur") for k in raditaji):
+        if bez_eur == len(rindas):
+            st.info("Šajos PDF nav € vērtību (pārdodamo cirsmu formātā ir tikai apjomi m³).")
+        else:
+            st.info(f"{bez_eur} no {len(rindas)} cirsmām nav € vērtību — € summās tās nav iekļautas.")
 
     # --- Kopsummas ---
     st.subheader("Kopā")
@@ -101,45 +110,59 @@ def render() -> None:
         for kol, k in zip(kolonnas, raditaji[i:i + pa_rindai]):
             kol.metric(_kol(k), fmt(kop.get(k), RADITAJI[k]["dec"]))
 
-    pa_ipasumiem: dict[str, list[str]] = {}
-    for n in novertejumi:
-        pa_ipasumiem.setdefault(f"{n.saimnieciba or '—'} ({n.kadastrs})", []).append(n.nosaukums)
-    st.caption(" · ".join(f"**{k}**: {', '.join(v)}" for k, v in pa_ipasumiem.items()))
+    pa_ipasumiem: dict[str, int] = {}
+    for n, r in zip(novertejumi, rindas):
+        pa_ipasumiem[n.ipasuma_nosaukums] = pa_ipasumiem.get(n.ipasuma_nosaukums, 0) + r["nogabali"]
+    st.caption(" · ".join(f"**{k}**: {v} nog." for k, v in pa_ipasumiem.items()))
 
-    # --- Pa nogabaliem ---
+    # --- Pa cirsmām / nogabaliem ---
     st.subheader("Pa nogabaliem")
-    tabulas = [k for k in raditaji if k != "nogabali"]
+    ir_cirsmu_nr = any(n.formats == FORMATS_PARDODAMA for n in novertejumi)
+    tabulas = [k for k in raditaji if k not in ("nogabali", "cirsmas")]
     ieraksti = []
     for n, r in zip(novertejumi, rindas):
-        ier = {"Saimniecība": n.saimnieciba, "Kadastrs": n.kadastrs, "Nogabals": n.nosaukums}
+        ier = {"Īpašums": n.ipasuma_nosaukums}
+        if ir_cirsmu_nr:
+            ier["Cirsma"] = f"nr. {n.cirsmas_nr}" if n.cirsmas_nr else ""
+        ier["Nogabals"] = n.nosaukums
+        ier["Nog. sk."] = r["nogabali"]
         ier.update({_kol(k): r.get(k) for k in tabulas})
         ieraksti.append(ier)
-    kop_ier = {"Saimniecība": "KOPĀ", "Kadastrs": "", "Nogabals": f"{len(novertejumi)} nog."}
+    kop_ier = {"Īpašums": "KOPĀ"}
+    if ir_cirsmu_nr:
+        kop_ier["Cirsma"] = f"{len(novertejumi)} cirsm."
+    kop_ier["Nogabals"] = ""
+    kop_ier["Nog. sk."] = kop["nogabali"]
     kop_ier.update({_kol(k): kop.get(k) for k in tabulas})
     df = pd.DataFrame(ieraksti + [kop_ier])
 
-    stils = df.style.format(
-        {_kol(k): (lambda v, d=RADITAJI[k]["dec"]: fmt(v, d)) for k in tabulas}
-    ).apply(lambda r: ["font-weight: 700"] * len(r) if r["Saimniecība"] == "KOPĀ"
-            else [""] * len(r), axis=1)
+    formati = {_kol(k): (lambda v, d=RADITAJI[k]["dec"]: fmt(v, d)) for k in tabulas}
+    formati["Nog. sk."] = lambda v: fmt(v, 0)
+    stils = df.style.format(formati, na_rep="—").apply(
+        lambda r: ["font-weight: 700"] * len(r) if r["Īpašums"] == "KOPĀ" else [""] * len(r),
+        axis=1)
     st.dataframe(stils, hide_index=True, use_container_width=True)
 
     # --- Pa sugām ---
     if st.session_state.get("nov_radit_sugas"):
-        st.subheader("Pa sugām (visi nogabali kopā)")
+        st.subheader("Pa sugām (visas cirsmas kopā)")
         sugas = [s for n in novertejumi for s in n.sugas]
         if sugas:
-            sdf = (pd.DataFrame(sugas)
-                   .groupby("suga", sort=False)[["skaits", "kraja", "lietkoksne", "resna", "videja",
-                                                 "tieva", "p_malka", "malka", "atlikumi", "pardosanai"]]
-                   .sum().sort_values("kraja", ascending=False).reset_index())
+            sdf = (pd.DataFrame(sugas).reindex(columns=["suga", *SUGU_SUMMEJAMAS])
+                   .groupby("suga", sort=False)[SUGU_SUMMEJAMAS].sum(min_count=1)
+                   .sort_values("kraja", ascending=False).reset_index())
             sdf["dala"] = sdf["kraja"] / sdf["kraja"].sum() * 100
-            sdf.columns = ["Suga", "Koku skaits", "Krāja, m³", "Lietkoksne, m³", "Resnā", "Vidējā",
-                           "Tievā", "P.malka", "Malka", "Atlikumi", "Pārdošanai, m³", "Daļa, %"]
-            formati = {c: (lambda v: fmt(v, 2)) for c in sdf.columns[1:]}
-            formati["Koku skaits"] = lambda v: fmt(v, 0)
-            formati["Daļa, %"] = lambda v: fmt(v, 1)
-            st.dataframe(sdf.style.format(formati), hide_index=True, use_container_width=True)
+            if sdf["p_malka"].isna().all():
+                sdf = sdf.drop(columns="p_malka")
+            nosaukumi = {"suga": "Suga", "skaits": "Koku skaits", "kraja": "Krāja, m³",
+                         "lietkoksne": "Lietkoksne, m³", "resna": "Resnā", "videja": "Vidējā",
+                         "tieva": "Tievā", "p_malka": "P.malka", "malka": "Malka",
+                         "atlikumi": "Atlikumi", "pardosanai": "Pārdošanai, m³", "dala": "Daļa, %"}
+            sdf = sdf.rename(columns=nosaukumi)
+            sf = {c: (lambda v: fmt(v, 2)) for c in sdf.columns[1:]}
+            sf["Koku skaits"] = lambda v: fmt(v, 0)
+            sf["Daļa, %"] = lambda v: fmt(v, 1)
+            st.dataframe(sdf.style.format(sf, na_rep="—"), hide_index=True, use_container_width=True)
         else:
             st.caption("Sugu dati netika nolasīti.")
 
