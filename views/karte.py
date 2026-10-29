@@ -170,10 +170,10 @@ for z in ss.karte_zv:
                         help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
                              f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
         b, c = st.columns(2)
-        b.button("✏️ Zīmēt", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
+        b.button("🧮 Aprēķins", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
                  args=(z["kadastrs"],), use_container_width=True,
-                 help="Nokopē robežu kā labojamu cirsmu: kartē spied ✎, velc virsotnes — platība, "
-                      "malu garumi un aprēķins atjaunojas.")
+                 help="Pārņem zemes vienības robežu kā cirsmu un aprēķina tās vērtību. Robežu var "
+                      "labot: kartē spied ✎, velc virsotnes — platība, malu garumi un aprēķins atjaunojas.")
         c.button("Noņemt", key=f"zv_del_{z['kadastrs']}", on_click=_nonemt_zv, args=(z["kadastrs"],),
                  use_container_width=True)
 
