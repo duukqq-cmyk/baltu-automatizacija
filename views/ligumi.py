@@ -10,6 +10,7 @@ import streamlit as st
 from cirsma.ligumi import (
     ekstrakcija_regex, ekstrakcija_ai, epasta_kopsavilkums, excel_ligumi,
 )
+from views.kopigi import faili_uz_json, saglabasanas_bloks
 
 st.title(":material/description: Līgumu datu izvilkšana no PDF")
 st.caption(
@@ -25,26 +26,38 @@ ai_atslega = st.sidebar.text_input(
          "deterministisko ekstrakciju. Bez atslēgas strādā noteikumu ekstrakcija.",
 )
 
-faili = st.file_uploader(
+ss = st.session_state
+augsupladeti = st.file_uploader(
     "Līgumu PDF faili", type="pdf", accept_multiple_files=True,
     help="Paraugi: dati/ligumi/paraugs_pirkuma_ligums.pdf un paraugs_nomas_ligums.pdf",
 )
-if not faili:
+if augsupladeti:
+    faili = [(f.name, f.getvalue()) for f in augsupladeti]
+    ss.ligumi_faili_sesija = faili               # lai paliek, pārslēdzot lapas
+elif ss.get("ligumi_faili_sesija"):
+    faili = ss.ligumi_faili_sesija
+    k1, k2 = st.columns([4, 1])
+    k1.caption(":material/folder_open: Izmanto iepriekš atvērtos failus: " + ", ".join(n for n, _ in faili))
+    if k2.button(":material/close: Notīrīt", use_container_width=True):
+        ss.pop("ligumi_faili_sesija", None)
+        ss.pop("pv_ielad_ligumi", None)
+        st.rerun()
+else:
     st.info(":material/upload: Augšupielādē vienu vai vairākus PDF līgumus (paraugi mapē `dati/ligumi/`).")
     st.stop()
 
 rezultati = []
-for fails in faili:
+for nosaukums, baiti in faili:
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(fails.read())
+        tmp.write(baiti)
         cels = tmp.name
     try:
         if ai_atslega:
-            d = ekstrakcija_ai(cels, ai_atslega, fails.name)
+            d = ekstrakcija_ai(cels, ai_atslega, nosaukums)
         else:
-            d = ekstrakcija_regex(cels, fails.name)
+            d = ekstrakcija_regex(cels, nosaukums)
     except Exception as e:  # noqa: BLE001
-        st.error(f"{fails.name}: neizdevās apstrādāt — {e}")
+        st.error(f"{nosaukums}: neizdevās apstrādāt — {e}")
         continue
     rezultati.append(d)
 
@@ -87,3 +100,16 @@ with open(xlsx_cels, "rb") as f:
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 st.download_button(":material/download: Lejupielādēt kopsavilkumu (teksts)", kopsavilkums,
                    file_name="ligumu_kopsavilkums.txt")
+
+st.divider()
+summas = [d.summa_eur for d in rezultati if d.summa_eur is not None]
+with st.container(border=True):
+    saglabasanas_bloks(
+        "ligumi", noklusetais=", ".join(dict.fromkeys(
+            p["nosaukums"] for d in rezultati for p in d.puses[:1] if p.get("nosaukums"))) or "Līgumi",
+        kadastrs=None,
+        dati_fn=lambda: {"faili": faili_uz_json(faili),
+                         "rezultati": [dataclasses.asdict(d) for d in rezultati]},
+        kopsavilkums={"ligumi": len(rezultati), "summa_eur": sum(summas) if summas else None,
+                      "datu_avots": "līgumi"},
+        virsraksts="Saglabāt līgumus")
