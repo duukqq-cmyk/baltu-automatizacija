@@ -117,59 +117,111 @@ def _variantu_josla(sadala: str) -> None:
 
 # --- Redaktori -----------------------------------------------------------------
 
-def _matrica_df(m: dict) -> pd.DataFrame:
-    return pd.DataFrame([{"Suga": k_, "Sortiments": s, "Cena EUR/m³": float(x[0]),
-                          "Īpatsvars %": round(float(x[1]) * 100, 2)}
-                         for k_, sort in m.items() for s, x in sort.items()])
-
-
-def _df_matrica(df: pd.DataFrame) -> dict:
-    m: dict = {}
-    for r in df.dropna(subset=["Suga", "Sortiments"]).to_dict("records"):
-        suga, sort = str(r["Suga"]).strip(), str(r["Sortiments"]).strip()
-        if suga and sort:
-            m.setdefault(suga, {})[sort] = [float(r["Cena EUR/m³"] or 0), float(r["Īpatsvars %"] or 0) / 100]
-    return m
-
-
 def _matricas_redaktors(sadala: str) -> None:
-    sakuma_df = _matrica_df(_bazes(sadala)["matrica"])
-    kolonnas = list(dict.fromkeys([*MATRICAS_KOLONNA.values(), CITI]))
-    df = st.data_editor(
-        sakuma_df, key=f"cen_m_{sadala}_{izv[sadala]}_{versija}", height=min(36 * len(sakuma_df) + 80, 1200),
-        num_rows="dynamic", hide_index=True, use_container_width=True,
-        column_config={
-            "Suga": st.column_config.SelectboxColumn(
-                options=kolonnas, required=True,
-                help="Matricas kolonna: " + ", ".join(f"{k_} = {n}" for k_, n in KOLONNU_NOS.items())),
-            "Sortiments": st.column_config.TextColumn(required=True),
-            "Cena EUR/m³": st.column_config.NumberColumn(min_value=0.0, step=1.0, format="%.2f"),
-            "Īpatsvars %": st.column_config.NumberColumn(min_value=0.0, max_value=100.0, step=1.0, format="%.1f"),
-        },
-    )
-    _saglabat_datus(sadala, {"matrica": _df_matrica(df)})
-    summas = df.groupby("Suga")["Īpatsvars %"].sum()
-    slikti = {k_: x for k_, x in summas.items() if abs(x - 100) > 0.05}
-    if slikti:
-        st.warning("Īpatsvaru summa nav 100 %: " + ", ".join(f"{k_} {x:.1f} %" for k_, x in slikti.items()))
+    """Kartītes pa sugām: katram sortimentam cena un īpatsvars ar +/− pogām."""
+    nos = izv[sadala]
+    matrica = copy.deepcopy(v.sadalas[sadala]["varianti"][nos]["matrica"])
+    pref = f"cm_{sadala}_{nos}_{versija}"
+    sugas = list(matrica)
+    jauna: dict = {}
+    for rinda in range(0, len(sugas), 2):
+        kolonnas_ui = st.columns(2, gap="medium")
+        for kol_ui, suga in zip(kolonnas_ui, sugas[rinda:rinda + 2]):
+            with kol_ui.container(border=True):
+                jauna[suga] = _sugas_kartite(sadala, pref, suga, matrica[suga])
+    _saglabat_datus(sadala, {"matrica": jauna})
+
+    brivas = [k_ for k_ in dict.fromkeys([*MATRICAS_KOLONNA.values(), CITI]) if k_ not in matrica]
+    if brivas:
+        with st.popover(":material/add: Pievienot sugu"):
+            suga = st.selectbox("Suga", brivas, format_func=lambda k_: f"{KOLONNU_NOS.get(k_, k_)} ({k_})",
+                                key=f"{pref}_jsuga")
+            if st.button("Pievienot", key=f"{pref}_jsuga_b", type="primary"):
+                jauna[suga] = {"Malka": [38.0, 1.0]}
+                _saglabat_datus(sadala, {"matrica": jauna})
+                _parzimet()
+                st.rerun()
+
+
+def _sugas_kartite(sadala: str, pref: str, suga: str, sortimenti: dict) -> dict:
+    galva, summa_vieta = st.columns([3, 2], vertical_alignment="center")
+    galva.markdown(f"**{KOLONNU_NOS.get(suga, suga)}** <span style='color:#6b7280'>({suga})</span>",
+                   unsafe_allow_html=True)
+    h = st.columns([2.2, 2.2, 2.2, 0.6])
+    h[0].caption("Sortiments")
+    h[1].caption("Cena €/m³")
+    h[2].caption("Īpatsvars %")
+    rez: dict = {}
+    for sort, x in sortimenti.items():
+        c = st.columns([2.2, 2.2, 2.2, 0.6], vertical_alignment="center")
+        c[0].markdown(sort)
+        cena = c[1].number_input(f"{suga} {sort} cena", min_value=0.0, value=float(x[0]), step=1.0,
+                                 format="%.2f", key=f"{pref}_{suga}_{sort}_c", label_visibility="collapsed")
+        proc = c[2].number_input(f"{suga} {sort} %", min_value=0.0, max_value=100.0,
+                                 value=round(float(x[1]) * 100, 2), step=1.0, format="%.1f",
+                                 key=f"{pref}_{suga}_{sort}_p", label_visibility="collapsed")
+        if c[3].button("✕", key=f"{pref}_{suga}_{sort}_x", help=f"Noņemt {sort}", type="tertiary"):
+            sortimenti_bez = {k_: x_ for k_, x_ in sortimenti.items() if k_ != sort}
+            _saglabat_datus(sadala, {"matrica": {**v.sadalas[sadala]["varianti"][izv[sadala]]["matrica"],
+                                                 suga: sortimenti_bez}})
+            _parzimet()
+            st.rerun()
+        rez[sort] = [cena, proc / 100]
+    summa = sum(p for _, p in rez.values()) * 100
+    if abs(summa - 100) <= 0.05:
+        summa_vieta.markdown(f"<div style='text-align:right;color:#16A34A;font-size:14px'>"
+                             f"✓ {summa:.0f} %</div>", unsafe_allow_html=True)
     else:
-        st.caption("✓ Visām sugām īpatsvaru summa ir 100 %.")
+        summa_vieta.markdown(f"<div style='text-align:right;color:#DC2626;font-size:14px'>"
+                             f"⚠ {summa:.1f} % (jābūt 100 %)</div>", unsafe_allow_html=True)
+    with st.popover(":material/add: Sortiments", use_container_width=False):
+        jauns = st.text_input("Nosaukums", key=f"{pref}_{suga}_jn", placeholder="piem., Finieris")
+        jc = st.number_input("Cena €/m³", min_value=0.0, value=50.0, step=1.0, key=f"{pref}_{suga}_jc")
+        jp = st.number_input("Īpatsvars %", min_value=0.0, max_value=100.0, value=0.0, step=1.0,
+                             key=f"{pref}_{suga}_jp")
+        if st.button("Pievienot", key=f"{pref}_{suga}_jb", type="primary"):
+            if not jauns.strip():
+                st.error("Ievadi sortimenta nosaukumu")
+            elif jauns.strip() in rez:
+                st.error("Tāds sortiments jau ir")
+            else:
+                rez[jauns.strip()] = [jc, jp / 100]
+                _saglabat_datus(sadala, {"matrica": {**v.sadalas[sadala]["varianti"][izv[sadala]]["matrica"],
+                                                     suga: rez}})
+                _parzimet()
+                st.rerun()
+    return rez
 
 
 def _izdevumu_redaktors() -> None:
-    bazes = _bazes("izdevumi")
-    izd = bazes["izdevumi"]
+    """Izdevumi €/m³ katram cirtes veidam (+/− pogas) un peļņas rezerve."""
+    nos = izv["izdevumi"]
+    dati = v.sadalas["izdevumi"]["varianti"][nos]
+    izd = dati["izdevumi"]
+    pref = f"ci_{nos}_{versija}"
     pozicijas = list(dict.fromkeys(p for vd in VEIDI for p in izd.get(vd, {})))
-    df = pd.DataFrame([{"Pozīcija": p, **{CIRTES_NOSAUKUMI[vd]: float(izd.get(vd, {}).get(p, 0.0)) for vd in VEIDI}}
-                       for p in pozicijas])
-    df = st.data_editor(df, key=f"cen_izd_{izv['izdevumi']}_{versija}", num_rows="dynamic", hide_index=True,
-                        use_container_width=True,
-                        column_config={CIRTES_NOSAUKUMI[vd]: st.column_config.NumberColumn(
-                            min_value=0.0, step=0.5, format="%.2f") for vd in VEIDI})
-    jauni = {vd: {str(r["Pozīcija"]): float(r[CIRTES_NOSAUKUMI[vd]] or 0)
-                  for r in df.dropna(subset=["Pozīcija"]).to_dict("records")} for vd in VEIDI}
-    pelna = st.slider("Peļņas rezerve, %", 0, 50, int(round(float(bazes["pelnas_rezerve"]) * 100)),
-                      key=f"cen_pelna_{izv['izdevumi']}_{versija}") / 100
+    jauni: dict = {vd: {} for vd in VEIDI}
+    kol = st.columns(len(VEIDI), gap="medium")
+    for kol_ui, vd in zip(kol, VEIDI):
+        with kol_ui.container(border=True):
+            st.markdown(f"**{CIRTES_NOSAUKUMI[vd]}**")
+            for p in pozicijas:
+                jauni[vd][p] = st.number_input(f"{p}, €/m³", min_value=0.0,
+                                               value=float(izd.get(vd, {}).get(p, 0.0)), step=0.5,
+                                               format="%.2f", key=f"{pref}_{vd}_{p}")
+            st.caption(f"Kopā: **{sum(jauni[vd].values()):.2f} €/m³**")
+    k1, k2 = st.columns([2, 3], vertical_alignment="bottom")
+    pelna = k1.number_input("Peļņas rezerve, %", min_value=0.0, max_value=80.0,
+                            value=round(float(dati["pelnas_rezerve"]) * 100, 1), step=1.0, format="%.1f",
+                            key=f"{pref}_pelna") / 100
+    with k2.popover(":material/add: Izdevumu pozīcija"):
+        jp = st.text_input("Nosaukums", key=f"{pref}_jp", placeholder="piem., Meža ceļa remonts")
+        if st.button("Pievienot", key=f"{pref}_jpb", type="primary") and jp.strip():
+            for vd in VEIDI:
+                jauni[vd][jp.strip()] = 0.0
+            _saglabat_datus("izdevumi", {"izdevumi": jauni, "pelnas_rezerve": pelna})
+            _parzimet()
+            st.rerun()
     _saglabat_datus("izdevumi", {"izdevumi": jauni, "pelnas_rezerve": pelna})
 
 
