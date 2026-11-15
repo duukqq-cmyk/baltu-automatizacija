@@ -42,7 +42,7 @@ def _saglabat_konf() -> None:
     ss.konf.saglabat(KONF_CELS)
 
 
-DATU_VERSIJA = 2  # palielini, ja mainās Boards/Rinda struktūra — citādi kešā paliek vecie objekti
+DATU_VERSIJA = 3  # palielini, ja mainās Boards/Rinda struktūra — citādi kešā paliek vecie objekti
 
 
 @st.cache_data(ttl=900, show_spinner="Ielādē boardus un grupu vēsturi no monday.com…")
@@ -175,6 +175,12 @@ if dati.no_vestures:
     st.caption(f":material/history: Posmu datumi ņemti no monday grupu vēstures (pārvietošana starp grupām). "
                f"Vēsture pieejama no {min(vestures_no)[8:10]}.{min(vestures_no)[5:7]}.{min(vestures_no)[:4]} — "
                "par agrāk pārvietotiem leadiem posmu datumu nav.")
+with st.expander(":material/history: monday vēstures diagnostika"):
+    for b in dati.boardi:
+        st.write(f"**{b.nosaukums}** — vēsture no {getattr(b, 'vesture_no', None) or '—'}; ierakstu veidi:",
+                 getattr(b, "zurnala_notikumi", {}) or "nav")
+        ar = sum(1 for r in b.rindas if getattr(r, "grupu_vesture", None))
+        st.caption(f"{ar} no {len(b.rindas)} rindām ir zināma ienākšana kādā grupā")
 if vestures_kludas:
     st.warning("Grupu vēsturi neizdevās nolasīt — " + "; ".join(vestures_kludas), icon=":material/history:")
 

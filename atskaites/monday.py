@@ -57,6 +57,7 @@ class Boards:
     grupas: list[str] = field(default_factory=list)
     vesture_no: str | None = None        # vecākā activity log ieraksta datums (ISO)
     vestures_kluda: str | None = None    # ja activity log nevarēja nolasīt
+    zurnala_notikumi: dict[str, int] = field(default_factory=dict)  # notikumu veids -> skaits
 
 
 _ITEM_LAUKI = """
@@ -235,6 +236,7 @@ class MondayKlients:
             boards.vestures_kluda = str(e)
             return
         vesture = grupu_vesture_no_zurnala(zurnals, grupu_id)
+        boards.zurnala_notikumi = zurnala_statistika(zurnals)
         laiki = [laiks_no_monday(z.get("created_at")) for z in zurnals]
         laiki = [x for x in laiki if x]
         boards.vesture_no = min(laiki) if laiki else None
@@ -289,13 +291,19 @@ def laiks_no_monday(v) -> str | None:
 
 
 def grupu_vesture_no_zurnala(zurnals: list[dict], grupu_id: dict[str, str]) -> dict[str, list[tuple[str, str]]]:
-    """Katrai rindai: kad tā pirmo reizi parādījās katrā grupā. -> {item_id: [(ISO, grupa)]}.
+    """Katrai rindai: kad tā ienāca katrā grupā. -> {item_id: [(ISO, grupa)]}.
 
-    Pārvietošana (move_pulse_into_group) ņem mērķa grupu; citi notikumi (create_pulse,
-    update_column_value…) satur grupu, kurā rinda tobrīd bija — tā ir augšējā robeža ienākšanai.
+    Ņem tikai notikumus, kas tiešām nozīmē ienākšanu grupā: pārvietošanu (move_pulse_into_group,
+    move_pulse_into_board → mērķa grupa) un izveidi (create_pulse → grupa, kurā izveidota).
+    Parasti labojumi (update_column_value u.c.) NEtiek ņemti, jo tie rāda tikai to, ka rinda
+    tobrīd bija grupā, nevis kad tā tur nonāca.
     """
     pirmo_reizi: dict[str, dict[str, str]] = {}
     for z in zurnals:
+        ev = z.get("event") or ""
+        ir_parv = ev.startswith("move_pulse_into")
+        if not (ir_parv or ev == "create_pulse"):
+            continue
         try:
             d = json.loads(z.get("data") or "{}")
         except ValueError:
@@ -306,12 +314,10 @@ def grupu_vesture_no_zurnala(zurnals: list[dict], grupu_id: dict[str, str]) -> d
         laiks = laiks_no_monday(z.get("created_at"))
         if not item or not laiks:
             continue
-        ev = z.get("event") or ""
-        grupa = None
-        if "group" in ev and ev.startswith("move"):
-            dest = d.get("dest_group") or {}
-            grupa = (dest.get("title") or dest.get("name") if isinstance(dest, dict) else None) \
-                or grupu_id.get(str(d.get("dest_group_id") or (dest.get("id") if isinstance(dest, dict) else "")))
+        if ir_parv:
+            dest = d.get("dest_group") if isinstance(d.get("dest_group"), dict) else {}
+            grupa = dest.get("title") or dest.get("name") \
+                or grupu_id.get(str(d.get("dest_group_id") or dest.get("id") or ""))
         else:
             grupa = d.get("group_name") or d.get("group_title") or grupu_id.get(str(d.get("group_id") or ""))
         if not grupa:
@@ -320,3 +326,9 @@ def grupu_vesture_no_zurnala(zurnals: list[dict], grupu_id: dict[str, str]) -> d
         if grupa not in g or laiks < g[grupa]:
             g[grupa] = laiks
     return {i: sorted(((t, gr) for gr, t in g.items())) for i, g in pirmo_reizi.items()}
+
+
+def zurnala_statistika(zurnals: list[dict]) -> dict[str, int]:
+    """Cik ierakstu pa notikumu veidiem (diagnostikai)."""
+    from collections import Counter
+    return dict(Counter(z.get("event") or "?" for z in zurnals).most_common())

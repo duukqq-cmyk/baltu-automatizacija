@@ -204,8 +204,12 @@ def test_grupu_vesture_no_activity_log():
         {"event": "create_pulse", "created_at": _ts("2026-11-02T09:00:00+00:00"),
          "data": json.dumps({"pulse_id": 1, "group_id": "g1", "group_name": "Jauns"})},
     ]
-    v = grupu_vesture_no_zurnala(z, {"g1": "Jauns", "g2": "Izpētes zvans"})
+    # labojums rindai 2, kas sen stāv grupā "Atteikts" — tas NAV ienākšana grupā
+    z.insert(0, {"event": "update_column_value", "created_at": _ts("2026-11-12T09:00:00+00:00"),
+                 "data": json.dumps({"pulse_id": 2, "group_id": "g9"})})
+    v = grupu_vesture_no_zurnala(z, {"g1": "Jauns", "g2": "Izpētes zvans", "g9": "Atteikts"})
     assert [(t[:10], g) for t, g in v["1"]] == [("2026-11-02", "Jauns"), ("2026-11-05", "Izpētes zvans")]
+    assert "2" not in v
 
 
 def test_posmu_datumi_no_grupu_vestures_dod_metrikus():
