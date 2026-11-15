@@ -20,7 +20,9 @@ from cirsma.novertejums import (
     kopsummas,
     parse_novertejums_pdf,
     rindas_vertibas,
+    vertet,
 )
+from views.kopigi import aktivais_cenradis
 
 _SEC = list(RADITAJI)
 
@@ -102,8 +104,11 @@ def render() -> None:
         else:
             st.info(f"{bez_eur} no {len(rindas)} cirsmām nav € vērtību — € summās tās nav iekļautas.")
 
+    # --- Vērtība pēc sortimentiem (kalkulators) ---
+    _vertibas_sadala(novertejumi)
+
     # --- Kopsummas ---
-    st.subheader("Kopā")
+    st.subheader("Kopsummas no PDF")
     pa_rindai = 5
     for i in range(0, len(raditaji), pa_rindai):
         kolonnas = st.columns(pa_rindai)
@@ -169,3 +174,61 @@ def render() -> None:
     csv = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
     st.download_button("⬇️ Lejupielādēt CSV", csv,
                        file_name="cirsmas_novertejums_kopsavilkums.csv", mime="text/csv")
+
+
+def _vertibas_sadala(novertejumi: list[Novertejums]) -> None:
+    """Precīza cirsmas vērtība: uzmērītie kubi pa sortimentiem × cenrāža cenas − izdevumi."""
+    c = aktivais_cenradis()
+    vertibas = [vertet(n, c) for n in novertejumi]
+    st.subheader("💶 Cirsmas vērtība pēc sortimentiem")
+    st.caption("Kubi no novērtējuma (precīzi uzmērīti) → sortimenti pēc Cenrāža kartējuma "
+               "(piem., skujkokiem Resnā = zāģbaļķi, Vidējā = sīkbaļķi, Tievā = tara, P. malka = "
+               "papīrmalka) × cenas − izdevumi − peļņas rezerve. Cenas, izdevumus un kartējumu maini "
+               "lapā **Cenrādis**.")
+    m3 = sum(v.m3 for v in vertibas)
+    ien = sum(v.ienemumi for v in vertibas)
+    izd = sum(v.izdevumi_kopa for v in vertibas)
+    maks = sum(v.max_summa for v in vertibas)
+    platiba = sum(n.platiba or 0 for n in novertejumi)
+    k = st.columns(5)
+    k[0].metric("Pārdodamais apjoms", f"{fmt(m3, 2)} m³")
+    k[1].metric("Ieņēmumi", f"{fmt(ien, 0)} €")
+    k[2].metric("Izdevumi", f"{fmt(izd, 0)} €")
+    k[3].metric("Max iegādes summa", f"{fmt(maks, 0)} €")
+    k[4].metric("Cena", f"{fmt(maks / m3 if m3 else None, 2)} €/m³",
+                help=f"{fmt(maks / platiba if platiba else None, 0)} €/ha")
+
+    ieraksti = []
+    for n, v in zip(novertejumi, vertibas):
+        ieraksti.append({
+            "Īpašums": n.ipasuma_nosaukums,
+            "Pārdodams m³": v.m3, "Ieņēmumi €": v.ienemumi, "Izdevumi €": v.izdevumi_kopa,
+            "Max summa €": v.max_summa, "€/m³": v.eur_m3, "€/ha": v.eur_ha,
+            "Mežvērtes vērtība €": v.mezverte,
+            "Starpība pret Mežvērti €": (round(v.ienemumi - v.izdevumi_kopa - v.mezverte, 2)
+                                         if v.mezverte is not None else None),
+            "Nogabals": n.nosaukums, "Platība ha": n.platiba,
+        })
+    df = pd.DataFrame(ieraksti)
+    sk = {c_: (lambda x: fmt(x, 2)) for c_ in df.columns if c_ not in ("Īpašums", "Nogabals")}
+    st.dataframe(df.style.format(sk, na_rep="—"), hide_index=True, use_container_width=True)
+    if any(v.mezverte is not None for v in vertibas):
+        st.caption("Starpība pret Mežvērti = (ieņēmumi − izdevumi) − Mežvērtes cirsmas vērtība.")
+    for n, v in zip(novertejumi, vertibas):
+        for b in v.bridinajumi:
+            st.warning(f"**{n.avots}**: {b}")
+
+    with st.expander("Sortimentu aprēķins"):
+        rindas = [dict(r, Nogabals=n.nosaukums) for n, v in zip(novertejumi, vertibas) for r in v.rindas]
+        if rindas:
+            sdf = (pd.DataFrame(rindas).groupby(["Suga", "Sortiments", "Cena EUR/m³"], sort=False)
+                   [["Apjoms m³", "Summa EUR"]].sum().reset_index())
+            st.dataframe(sdf, hide_index=True, use_container_width=True,
+                         column_config={"Apjoms m³": st.column_config.NumberColumn(format="%.2f"),
+                                        "Summa EUR": st.column_config.NumberColumn(format="%.2f")})
+    st.session_state.novertejuma_vertiba = {
+        "m3": m3, "ienemumi": ien, "izdevumi": izd, "max_summa": maks, "platiba": platiba,
+        "kadastri": sorted({n.kadastrs for n in novertejumi if n.kadastrs}),
+        "nosaukums": ", ".join(dict.fromkeys(n.ipasuma_nosaukums for n in novertejumi)),
+        "tabula": ieraksti,
+    }

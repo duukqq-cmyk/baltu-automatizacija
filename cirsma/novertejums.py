@@ -454,3 +454,99 @@ def _nat(s: str):
 def kartot(novertejumi: list[Novertejums]) -> list[Novertejums]:
     return sorted(novertejumi, key=lambda n: (n.ipasums, _nat(n.kvartals),
                                               _nat(n.nogabali[0] if n.nogabali else "")))
+
+
+# ---------------------------------------------------------------------------
+# Vērtība pēc sortimentiem (precīzi uzmērīti kubi × cenrāža cenas − izdevumi)
+# ---------------------------------------------------------------------------
+
+_SUGA_KOLONNA = {
+    "Priede": "P", "Egle": "E", "Bērzs": "B", "Apse": "A", "Baltalksnis": "Ba",
+    "Melnalksnis": "Ma", "Ozols": "Oz/Os", "Osis": "Oz/Os", "Ozols/Osis": "Oz/Os",
+}
+_NOV_LAUKI = ["ip_kval", "resna", "videja", "tieva", "p_malka", "malka"]
+
+
+def suga_uz_kolonnu(suga: str) -> str:
+    from .sortiment import CITI
+    return _SUGA_KOLONNA.get(suga, CITI)
+
+
+@dataclass
+class NovertejumaVertiba:
+    rindas: list[dict]               # suga, kolonna, sortiments, m3, cena, eur
+    m3: float
+    ienemumi: float
+    izdevumi: dict[str, float]
+    izdevumi_kopa: float
+    pelna: float
+    max_summa: float
+    eur_m3: float | None
+    eur_ha: float | None
+    mezverte: float | None           # cirsmas vērtība no PDF (Mežvērte), salīdzinājumam
+    bridinajumi: list[str] = field(default_factory=list)
+
+
+def vertet(n: Novertejums, cenradis) -> NovertejumaVertiba:
+    """Cirsmas vērtība: katras sugas Resnā/Vidējā/Tievā/P.malka/Malka m³ -> sortimenti
+    (cenrāža kartējums) × kailcirtes cenas; izdevumi € /m³ × pārdodamais apjoms.
+
+    Pārdodamo cirsmu formātā P.malka nav atdalīta — Tievā tiek sadalīta starp tievās un
+    p.malkas sortimentiem pēc kailcirtes matricas īpatsvariem.
+    """
+    from .cirtes import KAILCIRTE, KOPSANA, IZLASES
+    matrica = cenradis.matricas[KAILCIRTE]
+    bridin: list[str] = []
+    agg: dict[tuple[str, str, str], float] = {}
+
+    def pievienot(suga: str, kol: str, sort: str, m3: float) -> None:
+        if m3:
+            agg[(suga, kol, sort)] = agg.get((suga, kol, sort), 0.0) + m3
+
+    for s in n.sugas:
+        kol = suga_uz_kolonnu(s.get("suga", ""))
+        kart = cenradis.kartejums.get(kol) or cenradis.kartejums.get("Citi", {})
+        p_malka_atseviski = s.get("p_malka") is not None
+        for lauks in _NOV_LAUKI:
+            m3 = s.get(lauks) or 0.0
+            if not m3:
+                continue
+            sort = kart.get(lauks, "Malka")
+            if lauks == "tieva" and not p_malka_atseviski:
+                s_t, s_p = sort, kart.get("p_malka", sort)
+                if s_t != s_p:
+                    ip_t = matrica.get(kol, {}).get(s_t, (0, 0))[1]
+                    ip_p = matrica.get(kol, {}).get(s_p, (0, 0))[1]
+                    dala_p = ip_p / (ip_t + ip_p) if (ip_t + ip_p) > 0 else 0.0
+                    pievienot(s["suga"], kol, s_t, m3 * (1 - dala_p))
+                    pievienot(s["suga"], kol, s_p, m3 * dala_p)
+                    continue
+            pievienot(s["suga"], kol, sort, m3)
+
+    rindas = []
+    for (suga, kol, sort), m3 in agg.items():
+        cena = matrica.get(kol, {}).get(sort, (None, None))[0]
+        if cena is None:
+            bridin.append(f"{suga}: sortimentam '{sort}' nav cenas (kolonna {kol}) — vērtība 0")
+            cena = 0.0
+        rindas.append({"Suga": suga, "Sortiments": sort, "Apjoms m³": round(m3, 2),
+                       "Cena EUR/m³": cena, "Summa EUR": round(m3 * cena, 2)})
+
+    m3 = sum(r["Apjoms m³"] for r in rindas)
+    ienemumi = sum(r["Summa EUR"] for r in rindas)
+    cv = (n.cirtes_veids or "").lower()
+    veids = KOPSANA if "kopš" in cv else IZLASES if "izlas" in cv else KAILCIRTE
+    izdevumi = {p: round(likme * m3, 2) for p, likme in cenradis.izdevumi[veids].items()}
+    izd_kopa = sum(izdevumi.values())
+    segums = ienemumi - izd_kopa
+    pelna = segums * cenradis.pelnas_rezerve
+    max_summa = segums - pelna
+    if not n.sugas:
+        bridin.append("Sugu tabula netika nolasīta — vērtību nevar aprēķināt")
+    return NovertejumaVertiba(
+        rindas=rindas, m3=round(m3, 2), ienemumi=round(ienemumi, 2), izdevumi=izdevumi,
+        izdevumi_kopa=round(izd_kopa, 2), pelna=round(pelna, 2), max_summa=round(max_summa, 2),
+        eur_m3=round(max_summa / m3, 2) if m3 else None,
+        eur_ha=round(max_summa / n.platiba, 2) if n.platiba else None,
+        mezverte=n.cirsmas_vertiba, bridinajumi=bridin,
+    )

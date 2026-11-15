@@ -30,9 +30,10 @@ from karte.kadastrs import ATRIBUCIJA as VZD_ATRIBUCIJA, KadastrsKluda, apzimeju
 from karte.mvr import MvrKluda, lejupieladet_teritoriju, nogabali_no_faila
 from karte.mvr import robezas as mvr_robezas, uz_inventarizaciju
 from karte.parrekins import (
-    CIRSMAS_STATUSS, labojumi_no_kartes, nogabalu_saraksts, objekta_sadalijums, salidzinat,
-    uzmeritas_platibas,
+    CIRSMAS_STATUSS, automatiskas_cirsmas, blakus_kailcirsu_bridinajumi, labojumi_no_kartes,
+    nogabalu_saraksts, objekta_sadalijums, salidzinat, uzmeritas_visas,
 )
+from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
 # VZD proxy no Streamlit Secrets (drošībai arī tad, ja Secrets netiek padoti kā vides mainīgie)
@@ -57,6 +58,12 @@ ss.setdefault("karte_zv", [])            # atrastās zemes vienības (VZD)
 ss.setdefault("karte_zv_zina", None)
 ss.setdefault("karte_fokuss", None)
 ss.setdefault("karte_parklajumi", list(NOKLUSETIE_PARKLAJUMI))
+ss.setdefault("karte_auto_zv", [])        # zemes vienības, kurām jāiezīmē cērtamie nogabali
+ss.setdefault("karte_auto", True)
+cenradis = aktivais_cenradis()
+nt = cenradis.noteikumi
+aprekina_param = dict(matricas=cenradis.matricas, izdevumi_pa_veidiem=cenradis.izdevumi,
+                      pelnas_rezerve=cenradis.pelnas_rezerve)
 if ss.pop("karte_ieslegt_nogabalus", False):
     ss.karte_parklajumi = list(dict.fromkeys(list(ss.karte_parklajumi) + ["Mežaudžu plāns (VMD nogabali)"]))
 
@@ -98,7 +105,7 @@ def _zv_no_mvr(kadastrs: str) -> dict | None:
             "tikai_mezs": True}
 
 
-def _meklet_kadastru(kodi: list[str] | None = None) -> None:
+def _meklet_kadastru(kodi: list[str] | None = None, auto: bool = True) -> None:
     """Atrod zemes vienības VZD servisā, parāda kartē un ieslēdz nogabalu slāni."""
     kodi = kodi if kodi is not None else apzimejumi(ss.get("karte_kad_ievade", ""))
     if not kodi:
@@ -127,6 +134,8 @@ def _meklet_kadastru(kodi: list[str] | None = None) -> None:
                         ("info", "VZD kadastra serviss šobrīd nav sasniedzams — rādīta zemes vienības meža "
                                  "daļa pēc Meža valsts reģistra nogabaliem (bez precīzas kadastra robežas).")
                         if any(z.get("tikai_mezs") for z in atrasti) else None)
+    if atrasti and auto and ss.get("karte_auto", True):
+        ss.karte_auto_zv = ss.karte_auto_zv + [z["kadastrs"] for z in atrasti]
     if atrasti:
         ss.karte_ieslegt_nogabalus = True      # slāni ieslēdz nākamajā pārlādē (pirms logrīka)
         ss.karte_fokuss = [z["kadastrs"] for z in atrasti]
@@ -150,12 +159,20 @@ def _zv_ka_objekts(kadastrs: str) -> None:
     _mainits(pietuvinat=True)
 
 
+# Atvērts no "Saglabātie" — atrod zemes vienību (poligoni jau ielādēti, auto iezīmēšana nav vajadzīga)
+if ss.get("karte_atvert_kadastru"):
+    _meklet_kadastru([ss.pop("karte_atvert_kadastru")], auto=False)
+
 # --- Sānjosla: kadastrs -----------------------------------------------------
 st.sidebar.header("Meklēt pēc kadastra")
 st.sidebar.text_input("Zemes vienības kadastra apzīmējums", key="karte_kad_ievade",
                       placeholder="piem., 80640010066",
                       help="11 cipari (atstarpes nav svarīgas). Vairākus atdali ar komatu. "
                            "Dati: VZD Kadastrālie zemes gabali (INSPIRE), atjauno reizi nedēļā.")
+st.sidebar.toggle("Uzreiz iezīmēt cērtamos nogabalus", key="karte_auto",
+                  help="Atrodot zemes vienību, kailcirtei un kopšanai atbilstošajiem nogabaliem automātiski "
+                       "tiek uzzīmēti poligoni. Kailcirti, kas pārsniedz max platību pēc meža tipa, sadala "
+                       "ar atdalošo joslu. Poligonus var labot (✎) vai dzēst.")
 st.sidebar.button("🔎 Atrast kartē", on_click=_meklet_kadastru, use_container_width=True, type="primary")
 if ss.karte_zv_zina:
     getattr(st.sidebar, ss.karte_zv_zina[0])(ss.karte_zv_zina[1])
@@ -217,7 +234,8 @@ st.title("🗺️ Karte · cirsmu atzīmēšana un mērījumi")
 st.caption(
     "Zīmē cirsmas uz ortofoto, mēri platības un attālumus, importē KML/GeoJSON un piesaisti "
     "laukumus nogabaliem — cirsmas apjoms un vērtība pārrēķinās pēc uzmērītajām platībām. "
-    "**Beta versija:** objekti glabājas tikai šajā pārlūka sesijā — saglabā tos ar KML eksportu."
+    "Lai saglabātu darbu, atver aprēķinu kalkulatorā un spied **Saglabāt priekšvērtējumu** "
+    "(vai eksportē KML)."
 )
 
 # --- Imports ------------------------------------------------------------------
@@ -283,19 +301,32 @@ if mvr_df is not None and len(mvr_df):
     if inv is not None:
         nog_robezas = {k: g for k, g in nog_robezas.items() if k in {n.apzimejums for n in inv.nogabali}}
 
+# Automātiski iezīmē cērtamos nogabalus tikko atrastajai zemes vienībai
+if aktiva_zv in ss.karte_auto_zv and inv is not None and nog_robezas:
+    ss.karte_auto_zv = [k for k in ss.karte_auto_zv if k != aktiva_zv]
+    jau = set(uzmeritas_visas(objekti, nog_robezas))
+    jauni = automatiskas_cirsmas(inv, nog_robezas, nt, izlaist=jau)
+    if jauni:
+        ss.karte_objekti = objekti = objekti + jauni
+        ss.karte_zv_zina = ("success", f"Iezīmēti {len(jauni)} poligoni cērtamajiem nogabaliem "
+                                       f"({aktiva_zv}). Labo tos kartē ar ✎ vai dzēs tabulā Objekti.")
+        st.toast(ss.karte_zv_zina[1], icon="🌲")
+        _mainits()
+
 ss.setdefault("karte_tikai", True)
 ss.setdefault("karte_visi", True)     # iezīmētais laukums vienmēr nonāk aprēķinā (ar ⚠, ja neatbilst)
-uzmerits = uzmeritas_platibas(objekti, nog_robezas) if inv else {}
+uzmerits = uzmeritas_visas(objekti, nog_robezas) if inv else {}
 cirsmas_vertejumi = {}
 kartes_fin = None
 if inv:
     _lab = labojumi_no_kartes(inv, objekti, None, tikai_atzimetie=ss.karte_tikai and bool(uzmerits),
                               nogabalu_robezas=nog_robezas, ieklaut_neatbilstosos=ss.karte_visi)
-    cirsmas_vertejumi = {v.nogabals.apzimejums: v for v in novertet_ar_labojumiem(inv.nogabali, _lab)}
+    cirsmas_vertejumi = {v.nogabals.apzimejums: v for v in novertet_ar_labojumiem(inv.nogabali, _lab, nt)}
     if uzmerits:
         from cirsma.sortiment import aprekinat as _aprekinat
-        kartes_fin = _aprekinat(list(cirsmas_vertejumi.values()))
-sakotnejie = {n.apzimejums: novertet_nogabalu(n) for n in inv.nogabali} if inv else {}
+        kartes_fin = _aprekinat(list(cirsmas_vertejumi.values()), **aprekina_param)
+sakotnejie = {n.apzimejums: novertet_nogabalu(n, nt=nt) for n in inv.nogabali} if inv else {}
+blakus_bridinajumi = blakus_kailcirsu_bridinajumi(objekti, inv, nog_robezas, nt)
 
 # --- Karte --------------------------------------------------------------------
 _OBJEKTI_JS = Template("""
@@ -512,13 +543,15 @@ def _nog_popup(n, apz: str) -> str:
         rindas += [("Formula", n.formula or "—"), ("Vecums", f"{n.vecums or '—'} g."),
                    ("Bonitāte", n.bonitate or "—"),
                    ("H / D", f"{n.vid_augstums or '—'} m / {n.vid_caurmers or '—'} cm"),
+                   ("Meža tips", n.meza_tips or "—"),
+                   ("Šķērslaukums", f"{n.skerslaukums:g} m²/ha" if n.skerslaukums else "—"),
                    ("Krāja", f"{n.kraja_m3_ha:.0f} m³/ha" if n.kraja_m3_ha else "—")]
     if apz in uzmerits:
         rindas.append(("Uzmērīts kartē", f"<b>{uzmerits[apz]:.2f} ha</b>"))
     if v0 is not None:
-        rindas.append(("Kailcirtei", ("✅ atbilst" if v0.atlauta_kailcirte else "✗ neatbilst")
+        rindas.append(("Sistēmas lēmums", f"<b>{v0.cirtes_nosaukums}</b>"
                        + f"<br><small>{v0.pamatojums}</small>"))
-    if v is not None and v.atlauta_kailcirte and apz in uzmerits:
+    if v is not None and v.cirtams and apz in uzmerits:
         from cirsma.sortiment import vertejuma_apjoms
         rindas.append(("Cērtamais apjoms", f"<b>{vertejuma_apjoms(v)[0]:.0f} m³</b>"))
     for p in n.piezimes[:4]:
@@ -535,10 +568,13 @@ def _nogabalu_slanis() -> dict:
         if n is None:
             continue
         v0 = sakotnejie.get(apz)
-        if apz in uzmerits and v0 is not None and v0.atlauta_kailcirte:
+        if apz in uzmerits and v0 is not None and v0.cirtams:
             stils = {"color": "#ffffff", "weight": 2.5, "fillColor": "#e5484d", "fillOpacity": 0.12}
         elif apz in uzmerits:     # atzīmēts, bet neatbilst kailcirtei
             stils = {"color": "#f59e0b", "weight": 2.5, "dashArray": "2 4", "fillOpacity": 0.05,
+                     "fillColor": "#f59e0b"}
+        elif v0 is not None and v0.cirtes_veids == "kopsana":
+            stils = {"color": "#f59e0b", "weight": 2.5, "dashArray": "6 4", "fillOpacity": 0.05,
                      "fillColor": "#f59e0b"}
         elif v0 is not None and v0.atlauta_kailcirte:
             stils = {"color": "#4ade80", "weight": 2.5, "dashArray": "6 4", "fillOpacity": 0.05,
@@ -655,9 +691,11 @@ objekti = ss.karte_objekti
 # --- Tūlītējs rezultāts zem kartes ------------------------------------------------
 if objekti:
     kc = [o for o in objekti if o.get("statuss") == CIRSMAS_STATUSS and ir_laukums(o)]
+    kc = [o for o in objekti if o.get("statuss") in ("Kailcirte", "Kopšanas cirte", "Izlases cirte")
+          and ir_laukums(o)]
     if not kc:
-        st.info("Uzzīmētajiem laukumiem nav statusa **Kailcirte** — tabulā zemāk nomaini statusu, "
-                "lai laukums nonāktu aprēķinā.")
+        st.info("Uzzīmētajiem laukumiem nav cirtes statusa (Kailcirte / Kopšanas cirte / Izlases cirte) — "
+                "tabulā zemāk nomaini statusu, lai laukums nonāktu aprēķinā.")
     elif inv is None:
         st.warning("Aprēķinam vajag nogabalu datus: sānjoslā atrodi zemes vienību pēc kadastra "
                    "apzīmējuma vai ielādē inventarizācijas PDF.")
@@ -680,7 +718,9 @@ if objekti:
                 st.caption(f"ℹ️ No iezīmētajiem {iezimets:.2f} ha uz meža nogabaliem ir {uz_nog:.2f} ha; "
                            f"{iezimets - uz_nog:.2f} ha atrodas ārpus nogabaliem (ceļš, lauce, cita zeme vai "
                            "kaimiņu zeme) un netiek vērtēti.")
-            neatb = [k for k in uzmerits if sakotnejie.get(k) is not None and not sakotnejie[k].atlauta_kailcirte]
+            for b in blakus_bridinajumi:
+                st.warning(b)
+            neatb = [k for k in uzmerits if sakotnejie.get(k) is not None and not sakotnejie[k].cirtams]
             if neatb:
                 st.caption("⚠ Kailcirtei neatbilst: " + ", ".join(neatb)
                            + (" — iekļauti aprēķinā." if ss.karte_visi else " — aprēķinā nav iekļauti."))
@@ -729,7 +769,8 @@ else:
             "Kategorija": n.zemes_veids, "Formula": n.formula,
             "Valdošā suga": SUGU_NOSAUKUMI.get(valdosa_suga(n.formula), "") if n.formula else "",
             "Vecums": n.vecums, "Bonitāte": n.bonitate, "Krāja m³/ha": n.kraja_m3_ha,
-            "Kailcirtei": ("✅" if v0.atlauta_kailcirte else "—") if v0 else "",
+            "G m²/ha": n.skerslaukums, "Meža tips": n.meza_tips,
+            "Sistēmas lēmums": v0.cirtes_nosaukums if v0 else "",
             "Pamatojums": v0.pamatojums if v0 else "",
         })
     izvele = st.dataframe(
@@ -750,9 +791,17 @@ else:
               on_click=_iezimet_cirsmu, args=(atlasiti,), use_container_width=True, type="primary",
               help="Nogabala robeža tiek nokopēta kā kailcirtes laukums — kartē to var labot (✎), "
                    "un aprēķins pārrēķinās pēc uzmērītās platības.")
-    atbilst = [r["Nogabals"] for r in nog_rindas if r["Kailcirtei"] == "✅"]
-    b2.button(f"🌲 Visi kailcirtei atbilstošie ({len(atbilst)})", disabled=not (atbilst and nog_robezas),
-              on_click=_iezimet_cirsmu, args=(atbilst,), use_container_width=True)
+    cirtami = [r["Nogabals"] for r in nog_rindas if r["Sistēmas lēmums"] in ("Kailcirte", "Kopšanas cirte")]
+
+    def _iezimet_cirtamos() -> None:
+        jau = set(uzmeritas_visas(ss.karte_objekti, nog_robezas))
+        ss.karte_objekti = ss.karte_objekti + automatiskas_cirsmas(inv, nog_robezas, nt, izlaist=jau)
+        _mainits()
+
+    b2.button(f"🌲 Iezīmēt visus cērtamos ({len(cirtami)})", disabled=not (cirtami and nog_robezas),
+              on_click=_iezimet_cirtamos, use_container_width=True,
+              help="Kailcirtes un kopšanas poligoni pēc nogabalu robežām; kailcirti virs max platības "
+                   "sadala ar atdalošo joslu. Jau iezīmētos nogabalus izlaiž.")
     b3.caption("Atzīmē rindas tabulā vai uzzīmē cirsmu kartē — laukums automātiski tiek sadalīts pa "
                "nogabaliem. Kartē uzklikšķini uz nogabala, lai redzētu tā datus.")
 
@@ -856,8 +905,10 @@ else:
                   "Nogabali (pēc robežām)"]
         + ([] if nogabali else ["Nogabals"]),
         column_config={
-            "Statuss": st.column_config.SelectboxColumn(options=list(STATUSI), required=True,
-                                                        help="Nosaka krāsu kartē; 'Kailcirte' laukumi veido cirsmu"),
+            "Statuss": st.column_config.SelectboxColumn(
+                options=list(STATUSI), required=True,
+                help="Nosaka krāsu un cirtes veidu: Kailcirte / Kopšanas cirte / Izlases cirte laukumi "
+                     "nonāk aprēķinā; Atdalošā josla, Neiekļaut u.c. — ne."),
             "Nogabals": (st.column_config.SelectboxColumn(
                 options=nog_opcijas, width="large",
                 help="Neobligāti: piesaisti visu laukumu vienam nogabalam. Ja tukšs un nogabalu "
@@ -912,7 +963,7 @@ if inv and objekti:
                          help="Ieslēgts: viss, ko iezīmē kartē, nonāk aprēķinā (neatbilstošie atzīmēti ar ⚠). "
                               "Izslēgts: jaunaudzes u.c. kailcirtei neatbilstoši nogabali netiek iekļauti.")
         s = salidzinat(inv, objekti, esosie, tikai_atzimetie=tikai, nogabalu_robezas=nog_robezas,
-                       ieklaut_neatbilstosos=visi)
+                       ieklaut_neatbilstosos=visi, nt=nt, **aprekina_param)
         uz = "inventarizāciju" if ir_pdf else "reģistra platībām"
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Cirsmas platība", f"{sum(uzmerits.values()):.2f} ha")
@@ -929,17 +980,20 @@ if inv and objekti:
         if s.pec.pa_sugam_m3:
             st.caption("Apjoms pa sugām: " + " · ".join(
                 f"{SUGU_NOSAUKUMI.get(k, k)} {v:,.0f} m³" for k, v in s.pec.pa_sugam_m3.items()))
-        st.caption("Aprēķinā noklusējuma sortimentu cenas un izdevumi (kā Meža inventarizācijas sadaļā). "
-                   "Apjoms = krāja m³/ha × uzmērītā platība; sugu proporcijas saglabājas.")
+        st.caption("Cenas un izdevumi — no Cenrāža (kā Meža inventarizācijas sadaļā). Kailcirte: krāja "
+                   "m³/ha × uzmērītā platība; kopšana/izlases: izcērtamais šķērslaukums × veidaugstums × "
+                   "platība. Laukuma statuss kartē nosaka cirtes veidu.")
 
         jaunie = labojumi_no_kartes(inv, objekti, esosie, tikai, nog_robezas, visi)
-        v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie)
+        v_pec = novertet_ar_labojumiem(inv.nogabali, jaunie, nt)
         # Momentuzņēmums kalkulatoram ("Aprēķins no kartes" Meža inventarizācijas sadaļā)
         zimejums = json.dumps([[o["geometry"], o["statuss"], o.get("nogabals")] for o in objekti],
                               sort_keys=True) + str(tikai) + str(visi) + (inv.zemes_vieniba or "") + str(ir_pdf)
         ss.karte_aprekins = {
             "id": "karte_" + hashlib.sha1(zimejums.encode()).hexdigest()[:12],
             "inv": inv, "labojumi": jaunie, "uzmerits": dict(uzmerits),
+            "objekti": list(objekti), "kadastrs": inv.zemes_vieniba or aktiva_zv,
+            "robezas": nog_robezas,
             "apraksts": f"Zemes vienība {inv.zemes_vieniba or aktiva_zv or '—'} · dati: "
                         + (f"PDF {ss.inv_pdf['nosaukums']}" if ir_pdf else "Meža valsts reģistrs"),
         }

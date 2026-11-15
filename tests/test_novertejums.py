@@ -284,3 +284,30 @@ def test_daudzlapu_pdf(tmp_path):
     assert [n.cirsmas_nr for n in ns] == ["1", "7"]
     assert [n.lapa for n in ns] == [1, 2]
     assert sum(len(n.nogabali) for n in ns) == 6
+
+
+def test_vertiba_pec_sortimentiem():
+    from cirsma.cenradis import Cenradis
+    from cirsma.novertejums import vertet
+    n = parse_novertejums_teksts(NOG8, "nog8.pdf")
+    v = vertet(n, Cenradis())
+    assert v.m3 == pytest.approx(n.kopa["pardosanai"], abs=0.05)   # visi pārdodamie kubi ieskaitīti
+    priede = {r["Sortiments"]: r["Apjoms m³"] for r in v.rindas if r["Suga"] == "Priede"}
+    assert priede["Zāģbaļķi"] == pytest.approx(104.82)               # resnā -> zāģbaļķi
+    assert priede["Sīkbaļķi"] == pytest.approx(142.69)               # vidējā -> sīkbaļķi
+    assert v.izdevumi_kopa == pytest.approx(24 * v.m3, abs=0.1)
+    assert v.max_summa == pytest.approx((v.ienemumi - v.izdevumi_kopa) * 0.9, abs=0.05)
+
+
+def test_vertiba_pardodama_tieva_sadalita():
+    """Pārdodamo cirsmu formātā nav P.malkas — Tievā sadalīta tarā un papīrmalkā."""
+    from cirsma.cenradis import Cenradis
+    from cirsma.novertejums import vertet
+    n = parse_novertejums_teksts(PARD_1, "p.pdf")
+    v = vertet(n, Cenradis())
+    assert v.m3 == pytest.approx(n.kopa["pardosanai"], abs=0.05)
+    egle = {r["Sortiments"]: r["Apjoms m³"] for r in v.rindas if r["Suga"] == "Egle"}
+    tieva = next(s["tieva"] for s in n.sugas if s["suga"] == "Egle")
+    # egles matricā tara 10 %, papīrmalka 20 % -> 1/3 un 2/3
+    assert egle["Tara"] == pytest.approx(tieva / 3, abs=0.02)
+    assert egle["Papīrmalka"] == pytest.approx(tieva * 2 / 3, abs=0.02)

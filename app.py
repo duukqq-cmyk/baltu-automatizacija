@@ -6,6 +6,7 @@ Sākuma logā izvēlies moduli:
   2) Līgumu datu izvilkšana
   3) Leadu atskaites no monday.com
   4) ĢIS karte — cirsmu atzīmēšana, mērījumi un pārrēķins (beta)
+  + Cenrādis (kopīgas cenas, sortimenti, izdevumi, noteikumi) un Saglabātie priekšvērtējumi
 """
 import streamlit as st
 
@@ -18,8 +19,13 @@ st.set_page_config(
 pg = st.navigation([
     st.Page("views/sakums.py", title="Sākums", icon="🏠", default=True),
     st.Page("views/mezs.py", title="Meža inventarizācija", icon="🌲"),
+    st.Page("views/saglabatie.py", title="Saglabātie", icon="📁"),
+    st.Page("views/cenradis.py", title="Cenrādis", icon="💶"),
     st.Page("views/ligumi.py", title="Līgumu datu izvilkšana", icon="📄"),
     st.Page("views/atskaites.py", title="Atskaites", icon="📊"),
     st.Page("views/karte.py", title="Karte (beta)", icon="🗺️"),
 ])
+# Lietotāja vārds izmaiņu vēsturei un saglabātajiem priekšvērtējumiem (līdz būs pieteikšanās)
+st.sidebar.text_input("👤 Tavs vārds", key="lietotaja_vards",
+                      help="Tiek ierakstīts cenrāža izmaiņu vēsturē un saglabātajos priekšvērtējumos.")
 pg.run()

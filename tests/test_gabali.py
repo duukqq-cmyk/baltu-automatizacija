@@ -109,8 +109,8 @@ def test_vairaki_kvartali_netiek_jaukti():
     vertejumi = atlasit_kailcirtes(inv.nogabali)
     fin = aprekinat(vertejumi)
     cirt = [v for v in vertejumi if v.atlauta_kailcirte]
-    assert len(fin.apjomi) == len(cirt)
-    assert {a.nogabals.apzimejums for a in fin.apjomi} == {v.nogabals.apzimejums for v in cirt}
+    assert len([a for a in fin.apjomi if a.cirtes_veids == 'kailcirte']) == len(cirt)
+    assert {a.nogabals.apzimejums for a in fin.apjomi if a.cirtes_veids == 'kailcirte'} == {v.nogabals.apzimejums for v in cirt}
     assert fin.kopejais_m3 == pytest.approx(sum(a.kopejais_m3 for a in fin.apjomi), abs=0.1)
 
 
