@@ -5,3 +5,5 @@ __pycache__/
 .streamlit/secrets.toml
 dati/monday_konfiguracija.json
 dati/baltu.db
+.env.local
+.env
