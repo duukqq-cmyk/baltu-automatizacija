@@ -328,10 +328,11 @@ def normalizet_rindu(r: Rinda, karte: dict[str, str], grupu_karte: dict[str, str
 
 def _datumi_no_vestures(r: Rinda, lauki: dict, karte: dict[str, str], grupu_karte: dict[str, str]) -> None:
     """Aizpilda posmu datumus no grupu vēstures (tikai laukiem, kam boardā nav kolonnas)."""
-    if not r.grupu_vesture:
+    vesture = getattr(r, "grupu_vesture", None)
+    if not vesture:
         return
     ienaksana: list[tuple[date, str]] = []
-    for laiks, grupa in r.grupu_vesture:
+    for laiks, grupa in vesture:
         p = grupu_karte.get(grupa) or posms_no_teksta(grupa)
         d = parse_datums(laiks)
         if p and d:
@@ -540,7 +541,7 @@ def sagatavot(boardi: list[Boards], konf: Konfiguracija | None = None) -> Dati:
         kartes[b.id] = karte
         rindas.extend(normalizet_rindu(r, karte, grupu_karte) for r in b.rindas)
     no_vestures = set()
-    if any(r.grupu_vesture for b in boardi for r in b.rindas):
+    if any(getattr(r, "grupu_vesture", None) for b in boardi for r in b.rindas):
         no_vestures = {k for k in VESTURES_LAUKI if any(k not in kartes[b.id] for b in boardi)}
     return Dati(boardi, kartes, grupu_karte, rindas, apvienot_leados(rindas), no_vestures)
 

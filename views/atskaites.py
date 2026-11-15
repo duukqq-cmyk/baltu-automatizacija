@@ -42,8 +42,11 @@ def _saglabat_konf() -> None:
     ss.konf.saglabat(KONF_CELS)
 
 
-@st.cache_data(ttl=900, show_spinner="Ielādē boardus no monday.com…")
-def _ieladet(token: str, ids: tuple[str, ...]):
+DATU_VERSIJA = 2  # palielini, ja mainās Boards/Rinda struktūra — citādi kešā paliek vecie objekti
+
+
+@st.cache_data(ttl=900, show_spinner="Ielādē boardus un grupu vēsturi no monday.com…")
+def _ieladet(token: str, ids: tuple[str, ...], versija: int = DATU_VERSIJA):
     k = MondayKlients(token)
     return [k.ieladet_boardu(i) for i in ids]
 
@@ -166,8 +169,8 @@ st.sidebar.download_button(":material/download: Teksta kopsavilkums", teksts, fi
 st.subheader(f"Periods: {periods.nosaukums}")
 st.caption(f"{periods.no:%d.%m.%Y} – {periods.lidz:%d.%m.%Y} · {len(dati.boardi)} boardi · "
            f"{len(dati.rindas)} monday rindas → {len(dati.leadi)} leadi (visā laikā)")
-vestures_no = [b.vesture_no[:10] for b in dati.boardi if b.vesture_no]
-vestures_kludas = [f"{b.nosaukums}: {b.vestures_kluda}" for b in dati.boardi if b.vestures_kluda]
+vestures_no = [getattr(b, "vesture_no", None)[:10] for b in dati.boardi if getattr(b, "vesture_no", None)]
+vestures_kludas = [f"{b.nosaukums}: {b.vestures_kluda}" for b in dati.boardi if getattr(b, "vestures_kluda", None)]
 if dati.no_vestures:
     st.caption(f":material/history: Posmu datumi ņemti no monday grupu vēstures (pārvietošana starp grupām). "
                f"Vēsture pieejama no {min(vestures_no)[8:10]}.{min(vestures_no)[5:7]}.{min(vestures_no)[:4]} — "
