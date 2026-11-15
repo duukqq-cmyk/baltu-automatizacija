@@ -171,3 +171,17 @@ def test_klients_kluda():
     k = MondayKlients("", transport=lambda p: {"errors": [{"message": "Board not found"}]})
     with pytest.raises(MondayKluda, match="Board not found"):
         k.ieladet_boardu("1")
+
+
+def test_konfiguracija_dict_un_glabatuve(tmp_path):
+    from atskaites.modelis import Konfiguracija
+    from glabatuve import Glabatuve
+
+    k = Konfiguracija(boardi=["1", "2"], kolonnas={"telefons": "Tālr."}, grupas={"Jaunie": "jauns"})
+    assert Konfiguracija.no_dict(k.uz_dict()) == k
+    assert Konfiguracija.no_dict(None) == Konfiguracija()
+
+    g = Glabatuve(sqlite_cels=str(tmp_path / "t.db"))
+    g.izveidot()
+    g.saglabat_iestatijumu("monday_konfiguracija", k.uz_dict(), "tests")
+    assert Konfiguracija.no_dict(g.iestatijums("monday_konfiguracija")["vertiba"]) == k

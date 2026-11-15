@@ -459,19 +459,25 @@ class Konfiguracija:
     grupas: dict[str, str] = field(default_factory=dict)     # grupas nosaukums -> posms
 
     @classmethod
-    def ielasit(cls, cels: str) -> "Konfiguracija":
-        try:
-            with open(cels, encoding="utf-8") as f:
-                d = json.load(f)
-        except (OSError, ValueError):
-            return cls()
+    def no_dict(cls, d: dict | None) -> "Konfiguracija":
+        d = d or {}
         return cls(boardi=[str(b) for b in d.get("boardi", [])],
                    kolonnas=dict(d.get("kolonnas", {})), grupas=dict(d.get("grupas", {})))
 
+    def uz_dict(self) -> dict:
+        return {"boardi": self.boardi, "kolonnas": self.kolonnas, "grupas": self.grupas}
+
+    @classmethod
+    def ielasit(cls, cels: str) -> "Konfiguracija":
+        try:
+            with open(cels, encoding="utf-8") as f:
+                return cls.no_dict(json.load(f))
+        except (OSError, ValueError):
+            return cls()
+
     def saglabat(self, cels: str) -> None:
         with open(cels, "w", encoding="utf-8") as f:
-            json.dump({"boardi": self.boardi, "kolonnas": self.kolonnas, "grupas": self.grupas},
-                      f, ensure_ascii=False, indent=2)
+            json.dump(self.uz_dict(), f, ensure_ascii=False, indent=2)
 
 
 @dataclass

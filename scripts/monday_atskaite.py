@@ -7,7 +7,8 @@ Piemēri:
     python scripts/monday_atskaite.py --boardi 123 456 --no 2026-10-01 --lidz 2026-10-15
     python scripts/monday_atskaite.py --demo --excel demo.xlsx
 
-Boardu ID un kolonnu sasaisti ņem no dati/monday_konfiguracija.json (to saglabā web saskarne).
+Boardu ID un kolonnu sasaisti ņem no datubāzes (DATABASE_URL; to saglabā web saskarne),
+rezervē — no dati/monday_konfiguracija.json vai --konfiguracija faila.
 """
 from __future__ import annotations
 
@@ -27,13 +28,26 @@ from atskaites.monday import MondayKlients, MondayKluda  # noqa: E402
 KONF = os.path.join(os.path.dirname(__file__), "..", "dati", "monday_konfiguracija.json")
 
 
+def _konfiguracija(cels: str | None) -> Konfiguracija:
+    if cels:
+        return Konfiguracija.ielasit(cels)
+    try:
+        from glabatuve import glabatuve
+        ier = glabatuve().iestatijums("monday_konfiguracija")
+        if ier:
+            return Konfiguracija.no_dict(ier["vertiba"])
+    except Exception as e:  # noqa: BLE001
+        print(f"Datubāze nav pieejama ({e}) — lieto JSON failu.", file=sys.stderr)
+    return Konfiguracija.ielasit(KONF)
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description="Leadu atskaite no monday.com boardiem")
     p.add_argument("--menesis", help="YYYY-MM (noklusējums: tekošais mēnesis)")
     p.add_argument("--no", type=date.fromisoformat, help="perioda sākums YYYY-MM-DD")
     p.add_argument("--lidz", type=date.fromisoformat, help="perioda beigas YYYY-MM-DD")
     p.add_argument("--boardi", nargs="*", help="monday boardu ID (noklusējums: no konfigurācijas)")
-    p.add_argument("--konfiguracija", default=KONF)
+    p.add_argument("--konfiguracija", help="JSON fails (noklusējums: datubāze, tad " + KONF + ")")
     p.add_argument("--demo", action="store_true", help="izmantot demo datus (bez API)")
     p.add_argument("--excel", help="saglabāt Excel atskaiti")
     p.add_argument("--txt", help="saglabāt teksta kopsavilkumu")
@@ -47,7 +61,7 @@ def main(argv=None) -> int:
     else:
         periods = tekosais_menesis()
 
-    konf = Konfiguracija.ielasit(a.konfiguracija)
+    konf = _konfiguracija(a.konfiguracija)
     if a.demo:
         boardi = demo_boardi()
     else:
