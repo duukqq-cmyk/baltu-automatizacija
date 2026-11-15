@@ -19,6 +19,7 @@ un Entra ID app reģistrācijas client_id / client_secret.
 """
 from __future__ import annotations
 
+import hmac
 from typing import Iterable
 
 import streamlit as st
@@ -44,6 +45,32 @@ def _secrets_sadala(nos: str) -> dict:
 
 def pieteiksanas_ieslegta() -> bool:
     return bool(_secrets_sadala("auth"))
+
+
+def _app_parole() -> str:
+    try:
+        return str(st.secrets.get("APP_PAROLE", "") or "")
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def parole_ieslegta() -> bool:
+    """Pagaidu aizsardzība: viena kopīga parole (secrets APP_PAROLE), kamēr nav [auth]."""
+    return bool(_app_parole())
+
+
+def prasit_paroli() -> None:
+    if st.session_state.get("_parole_ok"):
+        return
+    st.title(":material/lock: Automatizācijas platforma")
+    with st.form("parole"):
+        ievade = st.text_input("Parole", type="password")
+        if st.form_submit_button("Ieiet", type="primary"):
+            if hmac.compare_digest(ievade.encode(), _app_parole().encode()):
+                st.session_state["_parole_ok"] = True
+                st.rerun()
+            st.error("Nepareiza parole.")
+    st.stop()
 
 
 def prasit_pieteiksanos() -> None:

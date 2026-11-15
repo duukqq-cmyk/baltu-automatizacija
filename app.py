@@ -10,7 +10,8 @@ Sākuma logā izvēlies moduli:
 """
 import streamlit as st
 
-from views.autentifikacija import lietotaja_josla, pieteiksanas_ieslegta, prasit_pieteiksanos
+from views.autentifikacija import (lietotaja_josla, parole_ieslegta, pieteiksanas_ieslegta,
+                                   prasit_paroli, prasit_pieteiksanos)
 from views.ikonas import SADALAS, css, nav
 
 st.set_page_config(
@@ -23,6 +24,8 @@ st.set_page_config(
 AUTH = pieteiksanas_ieslegta()
 if AUTH:
     prasit_pieteiksanos()
+elif parole_ieslegta():
+    prasit_paroli()  # pagaidu kopīgā parole, kamēr nav iestatīta [auth]
 
 NOSAUKUMI = {"sakums": "Sākums", "mezs": "Meža inventarizācija", "saglabatie": "Saglabātie",
              "cenradis": "Cenrādis", "ligumi": "Līgumu datu izvilkšana", "atskaites": "Atskaites",
