@@ -196,12 +196,24 @@ with tab_k:
     def _t(nos):  # nedēļu sērija sparklainam
         return [r[nos] for r in tend]
 
+    # Salīdzinājums nav godīgs, ja iepriekšējam periodam posmu vēstures vēl nebija (monday to neglabā)
+    vest_no = min(vestures_no) if vestures_no else None
+    iepr_bez_vestures = bool(dati.no_vestures and vest_no and iepr_p.no.isoformat() < vest_no)
+    NO_VESTURES = {"Kvalificēti objekti", "Priekšvērtējumi", "Apsekoti dabā", "Nopirkti objekti",
+                   "Atteikti objekti", "Sarunātas klātienes tikšanās", "Priekšvērtējumi vidēji darba dienā",
+                   "Kvalitatīvi", "Mērķa"}
+
     def K(nos, isais, tend_nos=None, **kw):
         m = next(m for m in atsk.metriki if m.nosaukums == nos)
         vien = {"gab.": "", "EUR": "€"}.get(m.vieniba, m.vieniba)
         kw.setdefault("vieniba", vien)
-        return Kartite(isais, m.vertiba, iepr=atsk_iepr.metriks(nos),
+        iepr = None if (iepr_bez_vestures and nos in NO_VESTURES) else atsk_iepr.metriks(nos)
+        return Kartite(isais, m.vertiba, iepr=iepr,
                        tendence=_t(tend_nos) if tend_nos else None, paskaidrojums=m.piezime, **kw)
+
+    if iepr_bez_vestures:
+        st.caption(f"Posmu rādītājiem salīdzinājums ar {iepr_p.nosaukums} nav rādīts — monday posmu vēsture "
+                   f"pieejama tikai no {vest_no[8:10]}.{vest_no[5:7]}.{vest_no[:4]}.")
 
     st.html(kartites_html([
         K("Leadi kopā", "Jauni leadi", "Leadi", galvenais=True),

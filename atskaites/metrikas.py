@@ -402,6 +402,12 @@ def salidzinajuma_periods(p: Periods, sod: date | None = None) -> Periods:
         if beigas == iepr_beigas:
             return Periods(no, beigas, f"{_MEN_IS[no.month - 1]} {no.year}")
         return Periods(no, beigas, f"{no.day}.–{beigas.day}. {_MEN_IS[no.month - 1]}")
+    if (lidz - p.no).days > 31:
+        # garāki periodi (piem. "Šis gads") — tie paši datumi pirms gada
+        def _pern(d: date) -> date:
+            return d.replace(year=d.year - 1, day=min(d.day, calendar.monthrange(d.year - 1, d.month)[1]))
+        no, beigas = _pern(p.no), _pern(lidz)
+        return Periods(no, beigas, f"{no:%d.%m.}–{beigas:%d.%m.%Y}")
     garums = (lidz - p.no).days + 1
     no = p.no - timedelta(days=garums)
     return Periods(no, p.no - timedelta(days=1), f"{no:%d.%m.}–{p.no - timedelta(days=1):%d.%m.}")
