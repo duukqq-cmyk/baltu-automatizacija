@@ -20,15 +20,34 @@ from datetime import datetime, timezone
 _NOKL_SQLITE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "dati", "baltu.db")
 
 
+def _no_env_faila(nosaukums: str) -> str | None:
+    """Lokālai izstrādei: .env.local / .env (piem., `neon env pull`). Vērtība netiek drukāta."""
+    sakne = os.path.dirname(os.path.abspath(__file__))
+    for fails in (".env.local", ".env"):
+        cels = os.path.join(sakne, fails)
+        if not os.path.exists(cels):
+            continue
+        with open(cels, encoding="utf-8") as f:
+            for rinda in f:
+                atsl, _, vert = rinda.strip().partition("=")
+                if atsl.strip().removeprefix("export ").strip() == nosaukums and vert:
+                    return vert.strip().strip('"').strip("'")
+    return None
+
+
 def _secret(nosaukums: str) -> str | None:
+    """Secība: vides mainīgais -> Streamlit Secrets -> .env.local / .env."""
     v = os.environ.get(nosaukums)
     if v:
         return v
     try:
         import streamlit as st
-        return st.secrets.get(nosaukums)  # type: ignore[no-any-return]
+        v = st.secrets.get(nosaukums)
+        if v:
+            return v  # type: ignore[no-any-return]
     except Exception:  # noqa: BLE001 — nav Streamlit vai secrets.toml
-        return None
+        pass
+    return _no_env_faila(nosaukums)
 
 
 def _tagad() -> str:
@@ -62,7 +81,9 @@ class Glabatuve:
     def _savienojums(self):
         if self.ir_postgres:
             import psycopg  # noqa: PLC0415 — vajadzīgs tikai ar Postgres
-            con = psycopg.connect(self.url)
+            # prepare_threshold=None — mākoņa savienojumu pūli (Neon/Supabase pooler, PgBouncer
+            # transakciju režīmā) neatbalsta servera puses sagatavotos vaicājumus
+            con = psycopg.connect(self.url, prepare_threshold=None, connect_timeout=15)
         else:
             os.makedirs(os.path.dirname(self.sqlite_cels) or ".", exist_ok=True)
             con = sqlite3.connect(self.sqlite_cels)
