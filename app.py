@@ -16,6 +16,12 @@ st.set_page_config(
     layout="wide",
 )
 
+# Pārzīmējot lapu (pēc katras darbības), Streamlit uz mirkli padara elementus blāvus — tas izskatās
+# kā raustīšanās. Rezultāti atjaunojas sekundes daļā, tāpēc blāvošanu izslēdzam visai lietotnei.
+st.sidebar.markdown("""<style>
+[data-stale="true"], .stale-element {opacity: 1 !important; transition: none !important; filter: none !important;}
+</style>""", unsafe_allow_html=True)
+
 pg = st.navigation([
     st.Page("views/sakums.py", title="Sākums", icon="🏠", default=True),
     st.Page("views/mezs.py", title="Meža inventarizācija", icon="🌲"),
