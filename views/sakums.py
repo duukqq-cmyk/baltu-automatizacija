@@ -63,7 +63,7 @@ with st.container(border=True):
 
 k1, k2 = st.columns(2)
 with k1.container(border=True):
-    st.markdown(f"{sadalas_ik('saglabatie')}&nbsp; **Saglabātie priekšvērtējumi** — meklē pēc kadastra numura, "
+    st.markdown(f"{sadalas_ik('saglabatie')}&nbsp; **Saglabātie darbi** — inventarizācija, karte, novērtējumi un līgumi; meklē pēc kadastra, "
                 "atver, lejupielādē PDF.", unsafe_allow_html=True)
     if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_saglabatajiem", use_container_width=True):
         st.switch_page("views/saglabatie.py")

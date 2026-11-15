@@ -34,7 +34,7 @@ from karte.parrekins import (
     nogabalu_saraksts, objekta_sadalijums, sadalit_objektu, salidzinat, uzmeritas_visas,
 )
 from views.ikonas import svg as _svg
-from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla
+from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla, saglabasanas_bloks
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
 # VZD proxy no Streamlit Secrets (drošībai arī tad, ja Secrets netiek padoti kā vides mainīgie)
@@ -163,6 +163,12 @@ def _zv_ka_objekts(kadastrs: str) -> None:
 # Atvērts no "Saglabātie" — atrod zemes vienību (poligoni jau ielādēti, auto iezīmēšana nav vajadzīga)
 if ss.get("karte_atvert_kadastru"):
     _meklet_kadastru([ss.pop("karte_atvert_kadastru")], auto=False)
+if ss.get("karte_atvert_kadastri"):
+    _meklet_kadastru(list(ss.pop("karte_atvert_kadastri")), auto=False)
+    if ss.get("karte_atvert_skats"):             # saglabātais kartes skats (nevis pietuvināt zemes vienībām)
+        ss.karte_skats = ss.karte_skats_html = ss.pop("karte_atvert_skats")
+        ss.karte_pietuvinat = ss.karte_pietuvinat_html = False
+        ss.karte_fokuss = ss.karte_fokuss_html = None
 
 # --- Sānjosla: kadastrs -----------------------------------------------------
 st.sidebar.header("Meklēt pēc kadastra")
@@ -1348,6 +1354,36 @@ else:
     pd.DataFrame(rindas).to_excel(buf, index=False, sheet_name="Objekti")
     e3.download_button(":material/download: Excel tabula", buf.getvalue(), file_name="cirsmas_objekti.xlsx",
                        use_container_width=True)
+
+# --- Saglabāšana ------------------------------------------------------------------
+if objekti or ss.karte_zv:
+    _kc = [o for o in objekti if o.get("statuss") in ("Kailcirte", "Kopšanas cirte", "Izlases cirte")
+           and ir_laukums(o)]
+    _kops = {
+        "objekti": len(objekti), "platiba_ha": round(kopplatiba_ha(_kc), 2) if _kc else 0.0,
+        "zemes_vieniba": aktiva_zv, "datu_avots": "karte",
+        **({"m3": kartes_fin.kopejais_m3, "max_summa": kartes_fin.max_iegades_summa,
+            "cena_eur_m3": kartes_fin.cena_eur_m3} if kartes_fin is not None else {}),
+    }
+
+    def _kartes_dati() -> dict:
+        return {
+            "objekti": [dict(o) for o in ss.karte_objekti],
+            "kadastri": [z["kadastrs"] for z in ss.karte_zv], "kadastrs": aktiva_zv,
+            "skats": ss.get("karte_skats"), "karte_tikai": ss.get("karte_tikai", True),
+            "karte_visi": ss.get("karte_visi", True),
+            "pdf_nosaukums": ss.inv_pdf["nosaukums"] if ss.get("inv_pdf") else None,
+        }
+
+    with st.container(border=True):
+        saglabasanas_bloks(
+            "karte", noklusetais=" · ".join(x for x in (
+                (inv.ipasums if inv else None), aktiva_zv) if x) or "Karte",
+            kadastrs=aktiva_zv, dati_fn=_kartes_dati, kopsavilkums=_kops,
+            pdf=(ss.inv_pdf["nosaukums"], ss.inv_pdf["baiti"]) if (ss.get("inv_pdf") and inv is inv_pdf) else None,
+            virsraksts="Saglabāt karti")
+        st.caption("Saglabājas visas figūras, zemes vienības, kartes skats un ielādētais PDF. "
+                   "Atver lapā Saglabātie — karte atvērsies tieši tāda.")
 
 # --- Pārrēķins ------------------------------------------------------------------
 ss.karte_aprekins = None

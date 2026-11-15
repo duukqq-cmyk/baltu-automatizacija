@@ -22,7 +22,7 @@ from cirsma.novertejums import (
     rindas_vertibas,
     vertet,
 )
-from views.kopigi import aktivais_cenradis
+from views.kopigi import aktivais_cenradis, faili_uz_json, saglabasanas_bloks
 
 _SEC = list(RADITAJI)
 
@@ -69,19 +69,31 @@ def render() -> None:
     with zobrats:
         raditaji = _iestatijumi()
 
-    faili = st.file_uploader("Cirsmas novērtējuma PDF", type=["pdf"],
-                             accept_multiple_files=True, key="nov_faili")
-    if not faili:
+    augsupladeti = st.file_uploader("Cirsmas novērtējuma PDF", type=["pdf"],
+                                    accept_multiple_files=True, key="nov_faili")
+    ss = st.session_state
+    if augsupladeti:
+        faili = [(f.name, f.getvalue()) for f in augsupladeti]
+        ss.nov_faili_sesija = faili              # lai paliek, pārslēdzot lapas
+    elif ss.get("nov_faili_sesija"):
+        faili = ss.nov_faili_sesija
+        k1, k2 = st.columns([4, 1])
+        k1.caption(":material/folder_open: Izmanto iepriekš atvērtos failus: "
+                   + ", ".join(n for n, _ in faili))
+        if k2.button(":material/close: Notīrīt", use_container_width=True):
+            ss.pop("nov_faili_sesija", None)
+            ss.pop("pv_ielad_novertejums", None)
+            st.rerun()
+    else:
         st.info(":material/upload: Ievelc šeit cirsmas novērtējuma PDF failus (var vairākus uzreiz).")
         return
 
     novertejumi: list[Novertejums] = []
-    for f in faili:
-        dati = f.getvalue()
+    for nosaukums, dati in faili:
         try:
-            novertejumi.extend(_nolasit(dati, f.name, hashlib.md5(dati).hexdigest()))
+            novertejumi.extend(_nolasit(dati, nosaukums, hashlib.md5(dati).hexdigest()))
         except Exception as e:  # noqa: BLE001 — rādām lietotājam, turpinām ar pārējiem
-            st.error(f"**{f.name}**: neizdevās nolasīt — {e}")
+            st.error(f"**{nosaukums}**: neizdevās nolasīt — {e}")
     if not novertejumi:
         return
 
@@ -174,6 +186,19 @@ def render() -> None:
     csv = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
     st.download_button(":material/download: Lejupielādēt CSV", csv,
                        file_name="cirsmas_novertejums_kopsavilkums.csv", mime="text/csv")
+
+    v = ss.get("novertejuma_vertiba") or {}
+    kadastri = v.get("kadastri") or []
+    with st.container(border=True):
+        saglabasanas_bloks(
+            "novertejums", noklusetais=v.get("nosaukums") or "Cirsmas novērtējums",
+            kadastrs=kadastri[0] if kadastri else None,
+            dati_fn=lambda: {"faili": faili_uz_json(faili), "kadastri": kadastri},
+            kopsavilkums={"m3": v.get("m3"), "max_summa": v.get("max_summa"),
+                          "cena_eur_m3": (v["max_summa"] / v["m3"]) if v.get("m3") else None,
+                          "platiba_ha": v.get("platiba"), "nogabali": len(novertejumi),
+                          "datu_avots": "novērtējums"},
+            virsraksts="Saglabāt novērtējumu")
 
 
 def _vertibas_sadala(novertejumi: list[Novertejums]) -> None:
