@@ -171,7 +171,7 @@ def _med(v: list[int]) -> float | None:
 def aprekinat(dati: Dati, periods: Periods, sod: date | None = None) -> Atskaite:
     sod = sod or sodiena()
     leadi = dati.leadi
-    kartetie = {k for karte in dati.kartes.values() for k in karte}
+    kartetie = {k for karte in dati.kartes.values() for k in karte} | dati.no_vestures
 
     def nav(*keys) -> str:
         tr = [LAUKI_PEC_KEY[k].nosaukums for k in keys if k not in kartetie]
@@ -344,7 +344,8 @@ def aprekinat(dati: Dati, periods: Periods, sod: date | None = None) -> Atskaite
     for b in dati.boardi:
         karte = dati.kartes.get(b.id, {})
         trukstosas[b.nosaukums] = [l.nosaukums for k, l in LAUKI_PEC_KEY.items()
-                                   if k not in karte and k not in ("posms", "merka_lead", "kontaktpersona")]
+                                   if k not in karte and k not in dati.no_vestures
+                                   and k not in ("posms", "merka_lead", "kontaktpersona")]
 
     return Atskaite(periods, M, pa_agentiem, iemesli.most_common(), piltuve, tabula, kvalitate, trukstosas)
 

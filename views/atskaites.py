@@ -166,6 +166,14 @@ st.sidebar.download_button(":material/download: Teksta kopsavilkums", teksts, fi
 st.subheader(f"Periods: {periods.nosaukums}")
 st.caption(f"{periods.no:%d.%m.%Y} – {periods.lidz:%d.%m.%Y} · {len(dati.boardi)} boardi · "
            f"{len(dati.rindas)} monday rindas → {len(dati.leadi)} leadi (visā laikā)")
+vestures_no = [b.vesture_no[:10] for b in dati.boardi if b.vesture_no]
+vestures_kludas = [f"{b.nosaukums}: {b.vestures_kluda}" for b in dati.boardi if b.vestures_kluda]
+if dati.no_vestures:
+    st.caption(f":material/history: Posmu datumi ņemti no monday grupu vēstures (pārvietošana starp grupām). "
+               f"Vēsture pieejama no {min(vestures_no)[8:10]}.{min(vestures_no)[5:7]}.{min(vestures_no)[:4]} — "
+               "par agrāk pārvietotiem leadiem posmu datumu nav.")
+if vestures_kludas:
+    st.warning("Grupu vēsturi neizdevās nolasīt — " + "; ".join(vestures_kludas), icon=":material/history:")
 
 tab_k, tab_a, tab_p, tab_l, tab_dk, tab_i = st.tabs(
     ["Kopsavilkums", "Pa agentiem", "Piltuve tagad", "Leadi", f"Datu kvalitāte ({len(atsk.datu_kvalitate)})",

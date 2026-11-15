@@ -43,6 +43,8 @@ class Rinda:
     grupa: str
     izveidots: str | None
     vertibas: dict[str, str] = field(default_factory=dict)
+    # grupu vēsture no monday activity log: [(ISO laiks, grupas nosaukums)], vecākais pirmais
+    grupu_vesture: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -53,6 +55,8 @@ class Boards:
     rindas: list[Rinda]
     workspace: str = ""
     grupas: list[str] = field(default_factory=list)
+    vesture_no: str | None = None        # vecākā activity log ieraksta datums (ISO)
+    vestures_kluda: str | None = None    # ja activity log nevarēja nolasīt
 
 
 _ITEM_LAUKI = """
@@ -85,7 +89,7 @@ query ($ids: [ID!], $limit: Int!) {
   boards(ids: $ids) {
     id name
     workspace { name }
-    groups { title }
+    groups { id title }
     columns { id title type }
     items_page(limit: $limit) { cursor items { %s } }
   }
@@ -97,6 +101,14 @@ query ($cursor: String!, $limit: Int!) {
   next_items_page(cursor: $cursor, limit: $limit) { cursor items { %s } }
 }
 """ % _ITEM_LAUKI
+
+_Q_ZURNALS = """
+query ($ids: [ID!], $page: Int!, $limit: Int!) {
+  boards(ids: $ids) { activity_logs(limit: $limit, page: $page) { event data created_at } }
+}
+"""
+ZURNALA_LAPA = 1000
+ZURNALA_MAX_LAPAS = 50
 
 _M_KOLONNA = """
 mutation ($board: ID!, $title: String!, $tips: ColumnType!) {
@@ -179,7 +191,7 @@ class MondayKlients:
                 return rezultats
             lapa += 1
 
-    def ieladet_boardu(self, board_id: str) -> Boards:
+    def ieladet_boardu(self, board_id: str, vesture: bool = True) -> Boards:
         dati = self.vaicajums(_Q_BOARD, {"ids": [str(board_id)], "limit": LAPAS_IZMERS})
         boardi = dati.get("boards") or []
         if not boardi:
@@ -192,14 +204,42 @@ class MondayKlients:
             workspace=(b.get("workspace") or {}).get("name") or "",
             grupas=[g["title"] for g in b.get("groups") or []],
         )
+        grupu_id = {str(g.get("id")): g["title"] for g in b.get("groups") or []}
         lapa = b["items_page"]
         while True:
             for it in lapa["items"]:
                 boards.rindas.append(_rinda(boards, it, nosaukumi))
             kursors = lapa.get("cursor")
             if not kursors:
+                if vesture:
+                    self._pievienot_vesturi(boards, grupu_id)
                 return boards
             lapa = self.vaicajums(_Q_NAKAMA_LAPA, {"cursor": kursors, "limit": LAPAS_IZMERS})["next_items_page"]
+
+    def activity_log(self, board_id: str) -> list[dict]:
+        """Visi boarda activity log ieraksti (jaunākie pirmie), cik monday glabā."""
+        rez = []
+        for lapa in range(1, ZURNALA_MAX_LAPAS + 1):
+            dati = self.vaicajums(_Q_ZURNALS, {"ids": [str(board_id)], "page": lapa, "limit": ZURNALA_LAPA})
+            boardi = dati.get("boards") or [{}]
+            ieraksti = boardi[0].get("activity_logs") or []
+            rez.extend(ieraksti)
+            if len(ieraksti) < ZURNALA_LAPA:
+                break
+        return rez
+
+    def _pievienot_vesturi(self, boards: Boards, grupu_id: dict[str, str]) -> None:
+        try:
+            zurnals = self.activity_log(boards.id)
+        except MondayKluda as e:
+            boards.vestures_kluda = str(e)
+            return
+        vesture = grupu_vesture_no_zurnala(zurnals, grupu_id)
+        laiki = [laiks_no_monday(z.get("created_at")) for z in zurnals]
+        laiki = [x for x in laiki if x]
+        boards.vesture_no = min(laiki) if laiki else None
+        for r in boards.rindas:
+            r.grupu_vesture = vesture.get(r.item_id, [])
 
     def izveidot_kolonnu(self, board_id: str, nosaukums: str, tips: str) -> dict:
         return self.vaicajums(_M_KOLONNA, {"board": str(board_id), "title": nosaukums, "tips": tips})["create_column"]
@@ -228,3 +268,55 @@ def _rinda(boards: Boards, it: dict, nosaukumi: dict[str, str]) -> Rinda:
         izveidots=it.get("created_at"),
         vertibas=vert,
     )
+
+
+def laiks_no_monday(v) -> str | None:
+    """monday activity log 'created_at' (17 cipari = 1e-7 s) -> ISO laiks Rīgas laikā."""
+    from datetime import datetime, timezone
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo("Europe/Riga")
+    except Exception:  # noqa: BLE001 — nav tzdata
+        tz = timezone.utc
+    if v is None:
+        return None
+    t = str(v).strip()
+    if t.isdigit() and len(t) >= 16:
+        return datetime.fromtimestamp(int(t) / 10_000_000, tz=tz).isoformat()
+    if t.isdigit() and len(t) == 13:
+        return datetime.fromtimestamp(int(t) / 1000, tz=tz).isoformat()
+    return t or None
+
+
+def grupu_vesture_no_zurnala(zurnals: list[dict], grupu_id: dict[str, str]) -> dict[str, list[tuple[str, str]]]:
+    """Katrai rindai: kad tā pirmo reizi parādījās katrā grupā. -> {item_id: [(ISO, grupa)]}.
+
+    Pārvietošana (move_pulse_into_group) ņem mērķa grupu; citi notikumi (create_pulse,
+    update_column_value…) satur grupu, kurā rinda tobrīd bija — tā ir augšējā robeža ienākšanai.
+    """
+    pirmo_reizi: dict[str, dict[str, str]] = {}
+    for z in zurnals:
+        try:
+            d = json.loads(z.get("data") or "{}")
+        except ValueError:
+            continue
+        if not isinstance(d, dict):
+            continue
+        item = d.get("pulse_id") or d.get("item_id")
+        laiks = laiks_no_monday(z.get("created_at"))
+        if not item or not laiks:
+            continue
+        ev = z.get("event") or ""
+        grupa = None
+        if "group" in ev and ev.startswith("move"):
+            dest = d.get("dest_group") or {}
+            grupa = (dest.get("title") or dest.get("name") if isinstance(dest, dict) else None) \
+                or grupu_id.get(str(d.get("dest_group_id") or (dest.get("id") if isinstance(dest, dict) else "")))
+        else:
+            grupa = d.get("group_name") or d.get("group_title") or grupu_id.get(str(d.get("group_id") or ""))
+        if not grupa:
+            continue
+        g = pirmo_reizi.setdefault(str(item), {})
+        if grupa not in g or laiks < g[grupa]:
+            g[grupa] = laiks
+    return {i: sorted(((t, gr) for gr, t in g.items())) for i, g in pirmo_reizi.items()}
