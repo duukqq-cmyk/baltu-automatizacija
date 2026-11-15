@@ -685,7 +685,22 @@ _EIROPA_JS = Template("""
     var pane = karte.createPane("valstis");
     pane.style.zIndex = 250;            // virs ortofoto, zem nogabaliem un figūrām
     pane.style.pointerEvents = "none";
-    fetch("/app/static/eiropas_robezas.json").then(function(r) { return r.json(); }).then(function(fc) {
+    // Streamlit Cloud lietotne darbojas zem /~/+/ — ceļu ņem no kartes (komponentes) adreses.
+    // Rezerve: publiskā repozitorija fails GitHub (CORS atļauts).
+    var bazes = location.pathname.split("/component/")[0].replace(/\/$/, "");
+    var avoti = [bazes + "/app/static/eiropas_robezas.json", "/app/static/eiropas_robezas.json",
+                 "https://raw.githubusercontent.com/duukqq-cmyk/baltu-automatizacija/main/static/eiropas_robezas.json"];
+    function ielade(i) {
+        if (i >= avoti.length) return Promise.reject("nav pieejams");
+        return fetch(avoti[i]).then(function(r) {
+            if (!r.ok) throw r.status;
+            return r.json();
+        }).then(function(fc) {
+            if (!fc || !fc.features) throw "nav GeoJSON";
+            return fc;
+        }).catch(function() { return ielade(i + 1); });
+    }
+    ielade(0).then(function(fc) {
         var linijas = L.geoJSON(fc, {pane: "valstis", interactive: false, style: function(f) {
             return {color: "#111", weight: f.properties.lv ? 1.8 : 1.1, opacity: .85, fill: false}; }});
         var nosaukumi = L.layerGroup();
