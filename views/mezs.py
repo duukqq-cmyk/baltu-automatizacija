@@ -67,9 +67,8 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
     st.session_state.tabulas_versija += 1
 
 
-st.title("🌲 Cirsmas vērtības aprēķins")
-AVOTS_PDF, AVOTS_KARTE = "📄 No inventarizācijas PDF", "🗺️ Aprēķins no kartes"
-AVOTS_NOVERTEJUMS = "🧮 Cirsmas novērtējums"
+st.title(":material/forest: Cirsmas vērtības aprēķins")
+from views.ikonas import AVOTS_KARTE, AVOTS_NOVERTEJUMS, AVOTS_PDF  # noqa: E402
 if st.session_state.pop("mezs_uz_karti", False):
     st.session_state.mezs_avots = AVOTS_KARTE
 st.session_state.setdefault("mezs_avots", AVOTS_PDF)
@@ -103,12 +102,12 @@ if avots == AVOTS_KARTE:
     if not ka or not ka.get("uzmerits"):
         st.info("Kartē vēl nav uzmērītas cirsmas. Atrodi zemes vienību pēc kadastra, uzzīmē vai "
                 "pārzīmē cirsmu — tad aprēķins parādīsies šeit.")
-        if st.button("🗺️ Atvērt karti", type="primary"):
+        if st.button(":material/map: Atvērt karti", type="primary"):
             st.switch_page("views/karte.py")
         st.stop()
     inv = ka["inv"]
     cels = os.path.join(tempfile.gettempdir(), f"karte_{ka['id']}.pdf")
-    st.caption(f"🗺️ {ka['apraksts']} · uzmērīts kartē: " + ", ".join(
+    st.caption(f":material/map: {ka['apraksts']} · uzmērīts kartē: " + ", ".join(
         f"{k} — {v:.2f} ha" for k, v in ka["uzmerits"].items()))
     faila_id = ka["id"]
     if st.session_state.get("faila_id") != faila_id:
@@ -130,7 +129,7 @@ elif fails:
 elif st.session_state.get("inv_pdf"):
     st.caption(f"Izmanto iepriekš ielādēto failu: **{st.session_state.inv_pdf['nosaukums']}**")
 else:
-    st.info("⬆️ Augšupielādē PDF failu, lai sāktu (paraugs: `dati/Nogabalu_raksturojosie_raditaji_64560020029.pdf`).")
+    st.info(":material/upload: Augšupielādē PDF failu, lai sāktu (paraugs: `dati/Nogabalu_raksturojosie_raditaji_64560020029.pdf`).")
     st.stop()
 
 if avots == AVOTS_PDF:
@@ -268,7 +267,7 @@ if labojumi:
     )
     l1.info(f"✎ Manuāli laboti {len(izmainas)} nogabali — aprēķins un atskaites ņem vērā labojumus."
             + (f"\n\n{atsifrejums}" if atsifrejums else ""))
-    if l2.button("↺ Atiestatīt visus labojumus" if avots == AVOTS_PDF else "↺ Atjaunot kartes mērījumus",
+    if l2.button(":material/undo: Atiestatīt visus labojumus" if avots == AVOTS_PDF else ":material/undo: Atjaunot kartes mērījumus",
                  use_container_width=True):
         st.session_state.labojumi = (copy.deepcopy(st.session_state.karte_aprekins["labojumi"])
                                      if avots == AVOTS_KARTE else {})
@@ -323,14 +322,14 @@ with st.expander("Gala atskaite", expanded=False):
     xlsx_cels = cels.replace(".pdf", "_atskaite.xlsx")
     excel_atskaite(xlsx_cels, inv, vertejumi, fin)
     with open(xlsx_cels, "rb") as f:
-        st.download_button("⬇️ Lejupielādēt Excel atskaiti", f,
+        st.download_button(":material/download: Lejupielādēt Excel atskaiti", f,
                            file_name="cirsmas_atskaite.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    st.download_button("⬇️ Lejupielādēt teksta atskaiti", atskaite, file_name="cirsmas_atskaite.txt")
+    st.download_button(":material/download: Lejupielādēt teksta atskaiti", atskaite, file_name="cirsmas_atskaite.txt")
 
 
 # --- Saglabāšana un eksports ---------------------------------------------------
-st.subheader("💾 Saglabāt priekšvērtējumu")
+st.subheader(":material/save: Saglabāt priekšvērtējumu")
 ss = st.session_state
 ielad = ss.get("priekvertejums")          # {"id", "nosaukums", "piezimes"} — ja atvērts no saglabātajiem
 kad = (ss.get("karte_aprekins") or {}).get("kadastrs") if avots == AVOTS_KARTE else None
@@ -368,24 +367,24 @@ def _saglabat(parrakstit: bool) -> None:
         pdf_nosaukums=avota_pdf["nosaukums"] if avota_pdf else None,
         id_=ielad["id"] if (parrakstit and ielad) else None)
     ss.priekvertejums = {"id": id_, "nosaukums": nosaukums, "piezimes": piezimes}
-    st.toast(f"Saglabāts: {nosaukums}", icon="💾")
+    st.toast(f"Saglabāts: {nosaukums}", icon=":material/save:")
 
 
 b1, b2, b3 = st.columns(3)
 if ielad:
-    b1.button(f"💾 Saglabāt izmaiņas", type="primary", use_container_width=True, disabled=g is None,
+    b1.button(f":material/save: Saglabāt izmaiņas", type="primary", use_container_width=True, disabled=g is None,
               on_click=_saglabat, args=(True,), help=f"Pārraksta atvērto priekšvērtējumu ({ielad['id']})")
-    b2.button("💾 Saglabāt kā jaunu", use_container_width=True, disabled=g is None,
+    b2.button(":material/save: Saglabāt kā jaunu", use_container_width=True, disabled=g is None,
               on_click=_saglabat, args=(False,))
 else:
-    b1.button("💾 Saglabāt", type="primary", use_container_width=True, disabled=g is None,
+    b1.button(":material/save: Saglabāt", type="primary", use_container_width=True, disabled=g is None,
               on_click=_saglabat, args=(False,),
               help="Saglabā avota PDF, labojumus, kartes poligonus, cenas un rezultātu. Atrodams lapā "
                    "Saglabātie pēc kadastra numura.")
 if pdf_baiti_atsk:
-    b3.download_button("⬇️ PDF atskaite", pdf_baiti_atsk, use_container_width=True,
+    b3.download_button(":material/download: PDF atskaite", pdf_baiti_atsk, use_container_width=True,
                        file_name=f"priekvertejums_{kad or 'cirsma'}.pdf", mime="application/pdf")
-with st.expander("📋 Teksts monday / e-pastam"):
+with st.expander(":material/content_copy: Teksts monday / e-pastam"):
     st.code(pv.monday_teksts(nosaukums, kops), language=None)
     st.caption("Ielīmē monday ieraksta Updates un pievieno PDF atskaiti. Automātiska augšupielāde "
                "monday būs, kad zināms boards un kolonnas.")

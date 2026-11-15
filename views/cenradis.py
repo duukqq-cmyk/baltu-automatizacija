@@ -20,7 +20,7 @@ c = aktivais_cenradis()
 versija = st.session_state.cenradis_versija
 bazes: Cenradis = st.session_state.setdefault("cenradis_bazes", copy.deepcopy(c))
 
-st.title("💶 Cenrādis un noteikumi")
+st.title(":material/euro: Cenrādis un noteikumi")
 st.caption("Cenas, sortimentu īpatsvari un izdevumi visām sadaļām: Meža inventarizācija, Karte un "
            "Cirsmas novērtējums. Izmaiņas strādā uzreiz šajā sesijā; lai tās kļūtu par noklusējumu "
            "visiem, spied **Saglabāt kā noklusējumu**.")
@@ -72,8 +72,11 @@ def _matricas_redaktors(veids: str) -> None:
         st.caption("✓ Visām sugām īpatsvaru summa ir 100 %.")
 
 
-cilnes = st.tabs(["🪓 Kailcirte", "🌿 Kopšanas cirte", "🌳 Izlases cirte", "💸 Izdevumi un peļņa",
-                  "🧮 Novērtējuma kartējums", "📏 Noteikumi", "🕓 Vēsture"])
+# Cirtes veidu krāsas — tādas pašas kā kartē (kailcirte / kopšana / izlase)
+cilnes = st.tabs([":red[:material/forest:] Kailcirte", ":orange[:material/eco:] Kopšanas cirte",
+                  ":violet[:material/park:] Izlases cirte", ":green[:material/payments:] Izdevumi un peļņa",
+                  ":blue[:material/calculate:] Novērtējuma kartējums", ":gray[:material/rule:] Noteikumi",
+                  ":gray[:material/history:] Vēsture"])
 
 with cilnes[0]:
     st.caption("Sortimentu iznākums kailcirtē. Šīs cenas izmanto arī cirsmas novērtējuma kalkulators.")
@@ -171,7 +174,7 @@ for b in c.bridinajumi():
 mainits = cenradis_mainits()
 st.caption("✎ Šajā sesijā ir nesaglabātas izmaiņas." if mainits else "Sesijas cenrādis sakrīt ar saglabāto.")
 b1, b2, b3 = st.columns(3)
-if b1.button("💾 Saglabāt kā noklusējumu visiem", type="primary", disabled=g is None or not mainits,
+if b1.button(":material/save: Saglabāt kā noklusējumu visiem", type="primary", disabled=g is None or not mainits,
              use_container_width=True):
     g.saglabat_iestatijumu(ATSLEGA, c.uz_json(), lietotajs())
     st.session_state.cenradis_saglabatais = copy.deepcopy(c)
@@ -179,12 +182,12 @@ if b1.button("💾 Saglabāt kā noklusējumu visiem", type="primary", disabled=
         k: v for k, v in g.iestatijums(ATSLEGA).items() if k != "vertiba"}
     st.success("Saglabāts.")
     st.rerun()
-if b2.button("↺ Atjaunot saglabāto", disabled=not mainits, use_container_width=True):
+if b2.button(":material/undo: Atjaunot saglabāto", disabled=not mainits, use_container_width=True):
     st.session_state.cenradis = copy.deepcopy(st.session_state.cenradis_saglabatais)
     st.session_state.cenradis_bazes = copy.deepcopy(st.session_state.cenradis)
     st.session_state.cenradis_versija += 1
     st.rerun()
-if b3.button("↺ Rūpnīcas noklusējums", use_container_width=True,
+if b3.button(":material/undo: Rūpnīcas noklusējums", use_container_width=True,
              help="Sākotnējās cenas (pamācības matrica). Lai tās kļūtu par noklusējumu, pēc tam saglabā."):
     st.session_state.cenradis = Cenradis()
     st.session_state.cenradis_bazes = copy.deepcopy(st.session_state.cenradis)

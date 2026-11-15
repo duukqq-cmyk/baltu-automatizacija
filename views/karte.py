@@ -33,6 +33,7 @@ from karte.parrekins import (
     CIRSMAS_STATUSS, automatiskas_cirsmas, blakus_kailcirsu_bridinajumi, labojumi_no_kartes,
     nogabalu_saraksts, objekta_sadalijums, sadalit_objektu, salidzinat, uzmeritas_visas,
 )
+from views.ikonas import svg as _svg
 from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
 
@@ -173,21 +174,21 @@ st.sidebar.toggle("Uzreiz iezīmēt cērtamos nogabalus", key="karte_auto",
                   help="Atrodot zemes vienību, kailcirtei un kopšanai atbilstošajiem nogabaliem automātiski "
                        "tiek uzzīmēti poligoni. Kailcirti, kas pārsniedz max platību pēc meža tipa, sadala "
                        "ar atdalošo joslu. Poligonus var labot (✎) vai dzēst.")
-st.sidebar.button("🔎 Atrast kartē", on_click=_meklet_kadastru, use_container_width=True, type="primary")
+st.sidebar.button(":material/search: Atrast kartē", on_click=_meklet_kadastru, use_container_width=True, type="primary")
 if ss.karte_zv_zina:
     getattr(st.sidebar, ss.karte_zv_zina[0])(ss.karte_zv_zina[1])
 for z in ss.karte_zv:
     with st.sidebar.container(border=True):
         if z.get("tikai_mezs"):
-            st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · mežs {z['platiba_graf_ha']:.2f} ha",
+            st.markdown(f":material/location_on: **[{z['kadastrs']}]({z['saite']})** · mežs {z['platiba_graf_ha']:.2f} ha",
                         help="Robeža = Meža valsts reģistra nogabalu apvienojums (VZD serviss nebija "
                              "pieejams). Saite atver kadastrs.lv.")
         else:
-            st.markdown(f"📍 **[{z['kadastrs']}]({z['saite']})** · {z['platiba_ha'] or 0:.2f} ha",
+            st.markdown(f":material/location_on: **[{z['kadastrs']}]({z['saite']})** · {z['platiba_ha'] or 0:.2f} ha",
                         help=f"Kadastrā reģistrētā platība {z['platiba_ha'] or 0:.2f} ha; pēc robežām "
                              f"(LKS-92) {z['platiba_graf_ha']:.2f} ha. Saite atver kadastrs.lv.")
         b, c = st.columns(2)
-        b.button("🧮 Aprēķins", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
+        b.button(":material/calculate: Aprēķins", key=f"zv_obj_{z['kadastrs']}", on_click=_zv_ka_objekts,
                  args=(z["kadastrs"],), use_container_width=True,
                  help="Pārņem zemes vienības robežu kā cirsmu un aprēķina tās vērtību. Robežu var "
                       "labot: kartē spied ✎, velc virsotnes — platība, malu garumi un aprēķins atjaunojas.")
@@ -206,7 +207,7 @@ caurspidigums = st.sidebar.slider("Pārklājumu necaurspīdīgums", 0.1, 1.0, 0.
                                   key="karte_opacity")
 uzraksti = st.sidebar.toggle("Objektu nosaukumi un platības kartē", value=True, key="karte_uzraksti")
 if any(s.startswith("Veģetācijas") for s in parklajumi):
-    st.sidebar.caption("🌲 " + PARKLAJUMI["Veģetācijas augstums"].apraksts)
+    st.sidebar.caption(":material/forest: " + PARKLAJUMI["Veģetācijas augstums"].apraksts)
 
 st.sidebar.divider()
 st.sidebar.subheader("Iet uz vietu")
@@ -230,7 +231,7 @@ if st.sidebar.button("Rādīt kartē", use_container_width=True, disabled=not vi
         st.sidebar.error("Ievadi divas koordinātas.")
 
 # --- Virsraksts ---------------------------------------------------------------
-st.title("🗺️ Karte · cirsmu atzīmēšana un mērījumi")
+st.title(":material/map: Karte · cirsmu atzīmēšana un mērījumi")
 st.caption(
     "Zīmē cirsmas uz ortofoto, mēri platības un attālumus, importē KML/GeoJSON un piesaisti "
     "laukumus nogabaliem — cirsmas apjoms un vērtība pārrēķinās pēc uzmērītajām platībām. "
@@ -239,7 +240,7 @@ st.caption(
 )
 
 # --- Imports ------------------------------------------------------------------
-with st.expander("📥 Importēt KML / GeoJSON", expanded=not ss.karte_objekti):
+with st.expander(":material/upload: Importēt KML / GeoJSON", expanded=not ss.karte_objekti):
     faili = st.file_uploader("KML vai GeoJSON faili (piem., no Google Earth, LVM GEO vai cita kartes rīka)",
                              type=["kml", "geojson", "json"], accept_multiple_files=True,
                              key=f"karte_imports_{ss.karte_versija}")
@@ -310,7 +311,7 @@ if aktiva_zv in ss.karte_auto_zv and inv is not None and nog_robezas:
         ss.karte_objekti = objekti = objekti + jauni
         ss.karte_zv_zina = ("success", f"Iezīmēti {len(jauni)} poligoni cērtamajiem nogabaliem "
                                        f"({aktiva_zv}). Labo tos kartē ar ✎ vai dzēs tabulā Objekti.")
-        st.toast(ss.karte_zv_zina[1], icon="🌲")
+        st.toast(ss.karte_zv_zina[1], icon=":material/forest:")
         _mainits()
 
 ss.setdefault("karte_tikai", True)
@@ -329,7 +330,12 @@ sakotnejie = {n.apzimejums: novertet_nogabalu(n, nt=nt) for n in inv.nogabali} i
 blakus_bridinajumi = blakus_kailcirsu_bridinajumi(objekti, inv, nog_robezas, nt)
 
 # --- Karte --------------------------------------------------------------------
-_OBJEKTI_JS = Template("""
+def _ar_ikonam(js: str) -> str:
+    """[[SVG:nosaukums:#krāsa]] JS veidnē -> iekļauta Material SVG ikona."""
+    return re.sub(r"\[\[SVG:(\w+):(#\w+)\]\]", lambda m: _svg(m.group(1), m.group(2)), js)
+
+
+_OBJEKTI_JS = Template(_ar_ikonam("""
 {% macro script(this, kwargs) %}
 (function() {
     var fc = {{ this.dati }};
@@ -549,11 +555,11 @@ _OBJEKTI_JS = Template("""
                            function() { BK.statuss(l, s); }, p.statuss === s ? "bk-aktivs" : "");
                 });
                 L.DomUtil.create("div", "bk-atdalitajs", izv);
-                punkts("✂️ Sadalīt ar atdalošo joslu", function() { BK.sadalit(l); });
+                punkts("[[SVG:content_cut:#7C3AED]] Sadalīt ar atdalošo joslu", function() { BK.sadalit(l); });
             }
-            punkts("🔍 Pietuvināt", function() { BK.pietuvinat(l); });
+            punkts("[[SVG:zoom_in:#2563EB]] Pietuvināt", function() { BK.pietuvinat(l); });
             L.DomUtil.create("div", "bk-atdalitajs", izv);
-            punkts("🗑 Dzēst figūru", function() { BK.dzest(l); }, "bk-bistams");
+            punkts("[[SVG:delete:#DC2626]] Dzēst figūru", function() { BK.dzest(l); }, "bk-bistams");
         }
         (papildPunkti || []).forEach(function(x) { punkts(x[0], x[1]); });
         izv.style.display = "block";
@@ -584,13 +590,13 @@ _OBJEKTI_JS = Template("""
                 return a;
             }
             this.pogas = [
-                poga("🏷", "Mainīt statusu (cirtes veidu)", function(l, a) {
+                poga("[[SVG:sell:#D97706]]", "Mainīt statusu (cirtes veidu)", function(l, a) {
                     var r = a.getBoundingClientRect(), k = karte.getContainer().getBoundingClientRect();
                     BK.izvelne(L.point(r.right - k.left + 6, r.top - k.top), l);
                 }),
-                poga("✂️", "Sadalīt kailcirti ar atdalošo joslu", function(l) { BK.sadalit(l); }),
-                poga("🔍", "Pietuvināt izvēlētajai figūrai", function(l) { BK.pietuvinat(l); }),
-                poga("🗑", "Dzēst izvēlēto figūru (arī Delete taustiņš)", function(l) { BK.dzest(l); }),
+                poga("[[SVG:content_cut:#7C3AED]]", "Sadalīt kailcirti ar atdalošo joslu", function(l) { BK.sadalit(l); }),
+                poga("[[SVG:zoom_in:#2563EB]]", "Pietuvināt izvēlētajai figūrai", function(l) { BK.pietuvinat(l); }),
+                poga("[[SVG:delete:#DC2626]]", "Dzēst izvēlēto figūru (arī Delete taustiņš)", function(l) { BK.dzest(l); }),
             ];
             BK.atjaunotRikus = function() {
                 this.pogas.forEach(function(a) { a.classList.toggle("bk-izslegts", !BK.izvelets); });
@@ -612,9 +618,9 @@ _OBJEKTI_JS = Template("""
     };
 })();
 {% endmacro %}
-""")
+"""))
 
-_NOGABALI_JS = Template("""
+_NOGABALI_JS = Template(_ar_ikonam("""
 {% macro script(this, kwargs) %}
 (function() {
     var karte = {{ this._parent.get_name() }};
@@ -655,8 +661,8 @@ _NOGABALI_JS = Template("""
                 if (!B.izvelne || B.aiznemts) return;
                 B.izveleties(null);
                 B.izvelne(e.containerPoint, null, [
-                    ["➕ Iezīmēt nogabalu kā figūru", function() { B.aizvertIzvelni(); izveidot(f); }],
-                    ["ℹ️ Nogabala dati", function() {
+                    ["[[SVG:add_box:#16A34A]] Iezīmēt nogabalu kā figūru", function() { B.aizvertIzvelni(); izveidot(f); }],
+                    ["[[SVG:info:#2563EB]] Nogabala dati", function() {
                         B.aizvertIzvelni();
                         L.popup({maxWidth: 360}).setLatLng(e.latlng).setContent(f.properties.popup).openOn(karte);
                     }],
@@ -674,7 +680,7 @@ _NOGABALI_JS = Template("""
     setTimeout(redzamiba, 400);
 })();
 {% endmacro %}
-""")
+"""))
 
 # Attālinot — apkārtējās valstis (Ziemeļeiropa) melnām līnijām, nevis tukšs balts fons.
 # Dati: static/eiropas_robezas.json (Natural Earth), ielādē vienreiz ar fetch, nevis kartes HTML.
@@ -687,7 +693,7 @@ _EIROPA_JS = Template("""
     pane.style.pointerEvents = "none";
     // Streamlit Cloud lietotne darbojas zem /~/+/ — ceļu ņem no kartes (komponentes) adreses.
     // Rezerve: publiskā repozitorija fails GitHub (CORS atļauts).
-    var bazes = location.pathname.split("/component/")[0].replace(/\/$/, "");
+    var bazes = location.pathname.split("/component/")[0].replace(/\\/$/, "");
     var avoti = [bazes + "/app/static/eiropas_robezas.json", "/app/static/eiropas_robezas.json",
                  "https://raw.githubusercontent.com/duukqq-cmyk/baltu-automatizacija/main/static/eiropas_robezas.json"];
     function ielade(i) {
@@ -822,6 +828,7 @@ if (window.L && L.drawLocal) {
 
 _STILS = """
 <style>
+.msvg {display: inline-block; vertical-align: middle; flex: none;}
 .karte-etikete {background: rgba(255,255,255,.85); border: 0; box-shadow: none;
   font: 600 11px/1.2 system-ui, sans-serif; padding: 1px 4px; color: #111;}
 .karte-etikete:before {display: none;}
@@ -857,7 +864,8 @@ _STILS = """
 .bk-aktivs {font-weight: 600;}
 .bk-bistams {color: #dc2626;}
 .bk-atdalitajs {height: 1px; background: #eee; margin: 3px 0;}
-.bk-riki a {font-size: 15px; line-height: 30px !important;}
+.bk-riki a {line-height: 30px !important; display: flex !important; align-items: center; justify-content: center;}
+.bk-punkts .msvg {width: 17px; height: 17px; margin: -3px 6px 0 -1px;}
 .bk-riki a.bk-izslegts {opacity: .4;}
 .bk-padoms {position: absolute; z-index: 1000; background: rgba(17,24,39,.9); color: #fff;
   font: 12px system-ui, sans-serif; padding: 5px 8px; border-radius: 4px; white-space: nowrap;}
@@ -1061,7 +1069,7 @@ def kartes_fragments() -> None:
             if o.pop("darbiba", None) == "sadalit":
                 dalas = sadalit_objektu(o, inv, nog_robezas, nt)
                 if len(dalas) == 1:
-                    st.toast(f"{o['nosaukums']} nepārsniedz max kailcirtes platību — nav ko dalīt", icon="ℹ️")
+                    st.toast(f"{o['nosaukums']} nepārsniedz max kailcirtes platību — nav ko dalīt", icon=":material/info:")
                 izpilditi += dalas
             else:
                 izpilditi.append(o)
@@ -1073,16 +1081,16 @@ def kartes_fragments() -> None:
 
 
 k1, k2, k3 = st.columns([1, 1, 4])
-if k1.button("🔍 Pietuvināt objektiem", disabled=not (objekti or ss.karte_zv), use_container_width=True):
+if k1.button(":material/zoom_in: Pietuvināt objektiem", disabled=not (objekti or ss.karte_zv), use_container_width=True):
     ss.karte_fokuss = ss.karte_fokuss_html = None
     _mainits(pietuvinat=True)
-if k2.button("🗑 Notīrīt visu", disabled=not objekti, use_container_width=True):
+if k2.button(":material/delete: Notīrīt visu", disabled=not objekti, use_container_width=True):
     ss.karte_objekti, ss.karte_importeti = [], set()
     _mainits()
     st.rerun()
 k3.caption("**Klikšķis uz nogabala** — iezīmē to kā figūru · **velc virsotnes** (tuvinot līdz 16+) — robeža un "
            "platība mainās · **labais taustiņš** uz figūras — statuss, sadalīt ar joslu, dzēst (tās pašas "
-           "darbības ir kreisajā rīkjoslā: 🏷 ✂️ 🔍 🗑; Delete dzēš izvēlēto). Zīmēšana: ⬠ ╱ ▭ 📍, 📏 mērījums.")
+           "darbības ir kreisajā rīkjoslā; Delete dzēš izvēlēto). Zīmēšana un :material/straighten: mērījums — rīki kreisajā pusē.")
 
 kartes_fragments()
 objekti = ss.karte_objekti
@@ -1186,7 +1194,7 @@ else:
     )
     atlasiti = [nog_rindas[i]["Nogabals"] for i in (izvele.selection.rows if izvele else [])]
     b1, b2, b3 = st.columns([2, 2, 3])
-    b1.button(f"✏️ Iezīmēt kā cirsmu ({len(atlasiti)})", disabled=not (atlasiti and nog_robezas),
+    b1.button(f":material/edit: Iezīmēt kā cirsmu ({len(atlasiti)})", disabled=not (atlasiti and nog_robezas),
               on_click=_iezimet_cirsmu, args=(atlasiti,), use_container_width=True, type="primary",
               help="Nogabala robeža tiek nokopēta kā kailcirtes laukums — kartē to var labot (✎), "
                    "un aprēķins pārrēķinās pēc uzmērītās platības.")
@@ -1197,14 +1205,14 @@ else:
         ss.karte_objekti = ss.karte_objekti + automatiskas_cirsmas(inv, nog_robezas, nt, izlaist=jau)
         _mainits()
 
-    b2.button(f"🌲 Iezīmēt visus cērtamos ({len(cirtami)})", disabled=not (cirtami and nog_robezas),
+    b2.button(f":material/forest: Iezīmēt visus cērtamos ({len(cirtami)})", disabled=not (cirtami and nog_robezas),
               on_click=_iezimet_cirtamos, use_container_width=True,
               help="Kailcirtes un kopšanas poligoni pēc nogabalu robežām; kailcirti virs max platības "
                    "sadala ar atdalošo joslu. Jau iezīmētos nogabalus izlaiž.")
     b3.caption("Atzīmē rindas tabulā vai uzzīmē cirsmu kartē — laukums automātiski tiek sadalīts pa "
                "nogabaliem. Kartē uzklikšķini uz nogabala, lai redzētu tā datus.")
 
-with st.expander("📄 Inventarizācijas PDF (precīzāki dati nekā reģistrā)", expanded=False):
+with st.expander(":material/description: Inventarizācijas PDF (precīzāki dati nekā reģistrā)", expanded=False):
     jauns_pdf = st.file_uploader("VMD vai gabali.lv nogabalu PDF", type="pdf", key="karte_pdf")
     if jauns_pdf and (not ss.get("inv_pdf") or ss.inv_pdf["baiti"] != jauns_pdf.getvalue()):
         ss.inv_pdf = {"baiti": jauns_pdf.getvalue(), "nosaukums": jauns_pdf.name}
@@ -1242,7 +1250,7 @@ else:
         if o.get("krasa"):
             krasas[o["krasa"]] = krasas.get(o["krasa"], 0) + 1
     if krasas:
-        with st.expander(f"🎨 Importēto krāsu nozīme ({len(krasas)} krāsas)", expanded=len(krasas) > 1):
+        with st.expander(f":material/palette: Importēto krāsu nozīme ({len(krasas)} krāsas)", expanded=len(krasas) > 1):
             st.caption("Piešķir statusu visiem importētajiem objektiem ar vienu krāsu.")
             for kr, sk in krasas.items():
                 a, b, cc = st.columns([1, 3, 1])
@@ -1332,13 +1340,13 @@ else:
 
     # --- Eksports ---------------------------------------------------------------
     e1, e2, e3 = st.columns(3)
-    e1.download_button("⬇️ KML (Google Earth, LVM GEO)", uz_kml(objekti), file_name="cirsmas.kml",
+    e1.download_button(":material/download: KML (Google Earth, LVM GEO)", uz_kml(objekti), file_name="cirsmas.kml",
                        mime="application/vnd.google-earth.kml+xml", use_container_width=True)
-    e2.download_button("⬇️ GeoJSON", json.dumps(uz_geojson(objekti), ensure_ascii=False, indent=1),
+    e2.download_button(":material/download: GeoJSON", json.dumps(uz_geojson(objekti), ensure_ascii=False, indent=1),
                        file_name="cirsmas.geojson", mime="application/geo+json", use_container_width=True)
     buf = io.BytesIO()
     pd.DataFrame(rindas).to_excel(buf, index=False, sheet_name="Objekti")
-    e3.download_button("⬇️ Excel tabula", buf.getvalue(), file_name="cirsmas_objekti.xlsx",
+    e3.download_button(":material/download: Excel tabula", buf.getvalue(), file_name="cirsmas_objekti.xlsx",
                        use_container_width=True)
 
 # --- Pārrēķins ------------------------------------------------------------------
@@ -1400,7 +1408,7 @@ if inv and objekti:
         def _uz_kalkulatoru() -> None:
             ss.mezs_uz_karti = True
 
-        if st.button("🧮 Atvērt kalkulatorā (cenas, sortimenti, atskaites)", type="primary",
+        if st.button(":material/calculate: Atvērt kalkulatorā (cenas, sortimenti, atskaites)", type="primary",
                      on_click=_uz_kalkulatoru, use_container_width=True):
             st.switch_page("views/mezs.py")
         p1, p2 = st.columns(2)
@@ -1408,9 +1416,9 @@ if inv and objekti:
                             f"karte_{hashlib.sha1(json.dumps(uz_geojson(objekti, False)).encode()).hexdigest()[:10]}.xlsx")
         excel_atskaite(xlsx, inv, v_pec, s.pec)
         with open(xlsx, "rb") as f:
-            p1.download_button("⬇️ Excel atskaite ar kartes platībām", f.read(),
+            p1.download_button(":material/download: Excel atskaite ar kartes platībām", f.read(),
                                file_name=f"cirsma_{inv.zemes_vieniba or 'karte'}.xlsx", use_container_width=True)
-        if ir_pdf and p2.button("➡️ Pārnest uz Meža inventarizāciju", use_container_width=True,
+        if ir_pdf and p2.button(":material/arrow_forward: Pārnest uz Meža inventarizāciju", use_container_width=True,
                                 help="Kartes platības kļūst par labojumiem nogabalu tabulā (var atiestatīt)."):
             ss.faila_id = pdf_id
             ss.labojumi = jaunie

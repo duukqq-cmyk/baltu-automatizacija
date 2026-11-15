@@ -9,9 +9,10 @@ import streamlit as st
 
 from cirsma import priekvertejums as pv
 from cirsma.cenradis import Cenradis
+from views.ikonas import AVOTS_PDF
 from views.kopigi import aktivais_cenradis, glabatuve
 
-st.title("📁 Saglabātie priekšvērtējumi")
+st.title(":material/folder_open: Saglabātie priekšvērtējumi")
 g = glabatuve()
 if g is None:
     st.stop()
@@ -22,7 +23,7 @@ meklet = st.text_input("Meklēt", placeholder="kadastra nr. vai nosaukuma daļa"
 saraksts = g.meklet_priekvertejumus(meklet)
 if not saraksts:
     st.info("Nekas nav atrasts." if meklet else
-            "Vēl nav saglabātu priekšvērtējumu. Tos saglabā lapā Meža inventarizācija → 💾 Saglabāt.")
+            "Vēl nav saglabātu priekšvērtējumu. Tos saglabā lapā Meža inventarizācija → :material/save: Saglabāt.")
     st.stop()
 
 
@@ -32,7 +33,7 @@ def _sk(v, d=0):
 
 df = pd.DataFrame([{
     "Nosaukums": x["nosaukums"], "Kadastrs": x["kadastrs"],
-    "Avots": "🗺️ karte" if x["avots"] == "karte" else "📄 PDF",
+    "Avots": "Karte" if x["avots"] == "karte" else "PDF",
     "m³": _sk(x["kopsavilkums"].get("m3")), "ha": _sk(x["kopsavilkums"].get("platiba_ha"), 2),
     "Max summa €": _sk(x["kopsavilkums"].get("max_summa")),
     "€/m³": _sk(x["kopsavilkums"].get("cena_eur_m3"), 2),
@@ -76,24 +77,24 @@ def _atvert() -> None:
         ss.faila_id = hashlib.sha1(ier["pdf"]).hexdigest()
         ss.labojumi = labojumi
         ss.tabulas_versija = ss.get("tabulas_versija", 0) + 1
-        ss.mezs_avots = "📄 No inventarizācijas PDF"
+        ss.mezs_avots = AVOTS_PDF
         ss.priekvertejums = {"id": ier["id"], "nosaukums": ier["nosaukums"], "piezimes": d.get("piezimes", "")}
         ss.atvert_lapu = "views/mezs.py"
 
 
 b1, b2, b3, b4 = st.columns(4)
-if b1.button("📂 Atvērt", type="primary", use_container_width=True,
+if b1.button(":material/folder_open: Atvērt", type="primary", use_container_width=True,
              disabled=d["avots"] == "pdf" and not ier["pdf"]):
     _atvert()
     st.switch_page(st.session_state.pop("atvert_lapu"))
 atsk = pv.atskaites_pdf(d)
 if atsk:
-    b2.download_button("⬇️ PDF atskaite", atsk, file_name=f"priekvertejums_{ier['kadastrs'] or ier['id']}.pdf",
+    b2.download_button(":material/download: PDF atskaite", atsk, file_name=f"priekvertejums_{ier['kadastrs'] or ier['id']}.pdf",
                        mime="application/pdf", use_container_width=True)
 if ier["pdf"]:
-    b3.download_button("⬇️ Avota PDF", ier["pdf"], file_name=ier["pdf_nosaukums"] or "avots.pdf",
+    b3.download_button(":material/download: Avota PDF", ier["pdf"], file_name=ier["pdf_nosaukums"] or "avots.pdf",
                        mime="application/pdf", use_container_width=True)
-with b4.popover("🗑 Dzēst", use_container_width=True):
+with b4.popover(":material/delete: Dzēst", use_container_width=True):
     st.write(f"Dzēst **{ier['nosaukums']}**? To nevar atsaukt.")
     if st.button("Jā, dzēst", type="primary"):
         g.dzest_priekvertejumu(ier["id"])
