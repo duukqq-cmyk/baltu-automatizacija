@@ -1,77 +1,72 @@
-"""Sākuma lapa — moduļa izvēle."""
+"""Sākuma lapa — moduļa izvēle.
+
+Visas sadaļas ir vienādās kartītēs vienotā režģī (3 kolonnas): ikona + virsraksts,
+apraksts, rezultāts un poga "Atvērt" kartītes apakšā (vienā līmenī visās kartītēs). Kartītes vienā rindā ir vienāda augstuma.
+Jaunu sadaļu pievieno, ierakstot to sarakstā KARTITES.
+"""
 import streamlit as st
 
-from views.ikonas import sadalas_ik
+from views.ikonas import SADALAS, sadalas_ik
 
+# (sadaļas atslēga, virsraksts, apraksts, rezultāts)
+KARTITES: list[tuple[str, str, str, str]] = [
+    ("mezs", "Meža inventarizācija",
+     "Augšupielādē inventarizācijas PDF — katram nogabalam nosaka cirtes veidu, aprēķina apjomu "
+     "pa sugām un sortimentiem un maksimālo cirsmas iegādes summu.",
+     "gala atskaite ekrānā, PDF un Excel; saglabājama pēc kadastra nr."),
+    ("ligumi", "Līgumu datu izvilkšana",
+     "Augšupielādē vienu vai vairākus PDF līgumus — izvelk puses, summas, datumus, termiņus un "
+     "īpašos nosacījumus, ar brīdinājumiem šaubīgiem laukiem.",
+     "datu tabula, Excel fails un e-pasta kopsavilkums."),
+    ("atskaites", "Atskaites",
+     "Savāc datus no iepirkumu agentu monday.com boardiem, apvieno tos leados "
+     "(1 kadastra nr. = 1 lead) un aprēķina piltuves metrikus.",
+     "metriki ekrānā un pa agentiem, Excel un teksta atskaite."),
+    ("karte", "Karte (beta)",
+     "Ortofoto, LiDAR veģetācijas augstums, VMD mežaudžu plāns un kadastrs vienā kartē. "
+     "Zīmē un mēri cirsmas, importē KML, piesaisti laukumus nogabaliem.",
+     "apjoms un iegādes summa pēc uzmērītajām platībām."),
+    ("saglabatie", "Saglabātie darbi",
+     "Visi saglabātie darbi vienuviet — inventarizācijas, kartes aprēķini, novērtējumi un "
+     "līgumi. Meklē pēc kadastra nr., atver un turpini darbu.",
+     "atvērts darbs vai lejupielādēts PDF."),
+    ("cenradis", "Cenrādis",
+     "Kopīgie iestatījumi visām sadaļām — sortimentu cenas un īpatsvari pa sugām, "
+     "izdevumi un ciršanas noteikumi, ar izmaiņu vēsturi.",
+     "vienotas cenas un noteikumi visos aprēķinos."),
+]
 
-def _virsraksts(kolonna, atsl: str, teksts: str) -> None:
-    """Kartītes virsraksts ar sadaļas krāsaino ikonu (tāda pati kā navigācijā)."""
-    kolonna.markdown(f"### {sadalas_ik(atsl)}&nbsp; {teksts}", unsafe_allow_html=True)
+KOLONNAS = 3
 
+# Vienāda augstuma kartītes: kolonnas izstiepjas līdz rindas augstumam, kartīte aizpilda kolonnu,
+# un poga tiek nobīdīta uz kartītes apakšu.
+st.markdown("""<style>
+[data-testid="stHorizontalBlock"]:has(div[class*="st-key-kartite_"]) {align-items: stretch;}
+[data-testid="stColumn"]:has(div[class*="st-key-kartite_"]) > div {height: 100%;}
+[data-testid="stLayoutWrapper"]:has(> div[class*="st-key-kartite_"]) {flex: 1 1 auto; display: flex;}
+div[class*="st-key-kartite_"] {flex: 1 1 auto; height: 100%; display: flex; flex-direction: column;}
+div[class*="st-key-apaksa_"],
+div[class*="st-key-kartite_"] > div:has(> div[class*="st-key-apaksa_"]) {margin-top: auto;}
+div[class*="st-key-kartite_"] h4 {padding-top: 0;}
+div[class*="st-key-kartite_"] p {margin-bottom: 0.25rem;}
+</style>""", unsafe_allow_html=True)
 
 st.title(":material/home: Procesu automatizācijas platforma")
 st.caption("Izvēlies, kuru funkciju vēlies izmantot.")
 
-c1, c2, c3 = st.columns(3, gap="large")
-
-with c1:
-    with st.container(border=True):
-        _virsraksts(st, "mezs", "Meža inventarizācijas analīze")
-        st.write(
-            "Augšupielādē meža inventarizācijas PDF — sistēma katram nogabalam nosaka cirtes veidu "
-            "(kailcirte ar platību pēc meža tipa, kopšanas vai izlases cirte pēc šķērslaukuma), "
-            "aprēķina apjomu pa sugām un sortimentiem un maksimālo cirsmas iegādes summu."
-        )
-        st.write("**Rezultāts:** gala atskaite (ekrānā, PDF, Excel), saglabājama pēc kadastra nr.")
-        if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_mezu", type="primary", use_container_width=True):
-            st.switch_page("views/mezs.py")
-
-with c2:
-    with st.container(border=True):
-        _virsraksts(st, "ligumi", "Līgumu datu izvilkšana")
-        st.write(
-            "Augšupielādē vienu vai vairākus PDF līgumus — sistēma izvelk "
-            "galvenos parametrus: līguma puses, summas, datumus, termiņus un "
-            "īpašos nosacījumus, ar validācijas brīdinājumiem šaubīgiem laukiem."
-        )
-        st.write("**Rezultāts:** datu tabula, Excel fails un e-pasta kopsavilkums.")
-        if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_ligumiem", type="primary", use_container_width=True):
-            st.switch_page("views/ligumi.py")
-
-with c3:
-    with st.container(border=True):
-        _virsraksts(st, "atskaites", "Atskaites")
-        st.write(
-            "Savāc datus no iepirkumu agentu monday.com boardiem, apvieno rindas leados "
-            "(1 īpašuma kadastra Nr. = 1 lead) un aprēķina leadu, kvalifikācijas, "
-            "priekšvērtējumu, apsekošanas, pirkumu un atteikumu metrikus."
-        )
-        st.write("**Rezultāts:** metriki ekrānā, pa agentiem, Excel un teksta atskaite.")
-        if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_atskaitem", type="primary", use_container_width=True):
-            st.switch_page("views/atskaites.py")
-
-with st.container(border=True):
-    k1, k2 = st.columns([4, 1], vertical_alignment="center")
-    _virsraksts(k1, "karte", "Karte (beta)")
-    k1.write(
-        "Ortofoto, LiDAR veģetācijas augstums, VMD mežaudžu plāns un kadastra karte vienā kartē. "
-        "Zīmē un mēri cirsmas, importē KML, piesaisti laukumus nogabaliem — apjoms un iegādes "
-        "summa pārrēķinās pēc uzmērītajām platībām."
-    )
-    if k2.button("Atvērt", icon=":material/arrow_forward:", key="uz_karti", type="primary", use_container_width=True):
-        st.switch_page("views/karte.py")
-
-k1, k2 = st.columns(2)
-with k1.container(border=True):
-    st.markdown(f"{sadalas_ik('saglabatie')}&nbsp; **Saglabātie darbi** — inventarizācija, karte, novērtējumi un līgumi; meklē pēc kadastra, "
-                "atver, lejupielādē PDF.", unsafe_allow_html=True)
-    if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_saglabatajiem", use_container_width=True):
-        st.switch_page("views/saglabatie.py")
-with k2.container(border=True):
-    st.markdown(f"{sadalas_ik('cenradis')}&nbsp; **Cenrādis** — sortimentu cenas un īpatsvari, izdevumi un "
-                "ciršanas noteikumi visām sadaļām.", unsafe_allow_html=True)
-    if st.button("Atvērt", icon=":material/arrow_forward:", key="uz_cenradi", use_container_width=True):
-        st.switch_page("views/cenradis.py")
+for sakums in range(0, len(KARTITES), KOLONNAS):
+    kolonnas = st.columns(KOLONNAS, gap="medium")
+    for kol, (atsl, virsraksts, apraksts, rezultats) in zip(kolonnas, KARTITES[sakums:sakums + KOLONNAS]):
+        with kol:
+            with st.container(border=True, key=f"kartite_{atsl}"):
+                st.markdown(f"#### {sadalas_ik(atsl)}&nbsp; {virsraksts}", unsafe_allow_html=True)
+                st.markdown(apraksts)
+                # rezultāts + poga vienmēr kartītes apakšā (vienā līmenī visās kartītēs rindā)
+                with st.container(key=f"apaksa_{atsl}"):
+                    st.markdown(f"**Rezultāts:** {rezultats}")
+                    if st.button("Atvērt", icon=":material/arrow_forward:", key=f"uz_{atsl}",
+                                 type="primary", use_container_width=True):
+                        st.switch_page(SADALAS[atsl][2])
 
 st.divider()
 st.caption(
