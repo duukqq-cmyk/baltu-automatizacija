@@ -1,0 +1,3 @@
+[server]
+# static/ mapes faili pieejami /app/static/… (kartes valstu robežas)
+enableStaticServing = true
