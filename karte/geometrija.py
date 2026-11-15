@@ -289,7 +289,10 @@ def apvienot_ar_zimejumiem(objekti: list[dict], zimejumi: list[dict]) -> tuple[l
             veids = {"Polygon": "Laukums", "MultiPolygon": "Laukums",
                      "LineString": "Līnija", "Point": "Punkts"}[g["type"]]
             nos = props.get("nosaukums") or f"{veids} {nakamais}"   # piem., no nogabala klikšķa
-            jauni.append(jauns_objekts(g, nos, statuss=statuss))
+            o = jauns_objekts(g, nos, statuss=statuss)
+            if oid and oid not in pec_id:      # id piešķirts kartē (figūra jau ir uz kartes)
+                o["id"] = str(oid)
+            jauni.append(o)
             nakamais += 1
             mainits = True
     if len(redzeti) != len(objekti):

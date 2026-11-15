@@ -410,7 +410,27 @@ _OBJEKTI_JS = Template("""
             piesaistit(layer);
         }
     });
-    karte.on("draw:created", function(e) { setTimeout(function() { piesaistit(e.layer); }, 0); });
+    // Jauna figūra (klikšķis uz nogabala / ZV vai zīmēšanas rīks) — ar savu id, stilu un uzrakstu,
+    // lai Python pusei karte nebūtu jāpārzīmē (tad tā nemirgo)
+    function jaunsId() { return "j" + Math.random().toString(36).slice(2, 12); }
+    BK.pievienot = function(l, props) {
+        l.feature = l.feature || {type: "Feature", properties: {}};
+        var p = L.extend(l.feature.properties, props || {});
+        if (!p.id) p.id = jaunsId();
+        if (!p.statuss && l instanceof L.Polygon) p.statuss = "Kailcirte";
+        p.krasa = STATUSI[p.statuss] || "#14b8a6";
+        if (l.setStyle) l.setStyle(bazesStils(l));
+        if (!fg.hasLayer(l)) fg.addLayer(l);
+        if (!l.getTooltip()) {
+            l.bindTooltip(p.nosaukums || (l instanceof L.Polygon ? "Laukums" : l instanceof L.Polyline ? "Līnija" : "Punkts"),
+                          {permanent: {{ this.pastavigi }}, direction: "center", className: "karte-etikete"});
+        }
+        piesaistit(l);
+        atjaunotUzrakstu(l);
+        redigesana();
+        BK.pazinot(true);
+    };
+    karte.on("draw:created", function(e) { setTimeout(function() { BK.pievienot(e.layer); }, 0); });
 
     // ---- Virsotņu vilkšana bez rīka (no 15. tuvinājuma) -------------------------------
     var REDIGET_NO = 16;
@@ -604,11 +624,8 @@ _NOGABALI_JS = Template("""
         var B = bk();
         if (!B.fg || B.aiznemts) return;
         var p = f.properties;
-        var l = L.geoJSON(f.geometry).getLayers()[0];
-        l.feature = {type: "Feature", properties: {nosaukums: p.nosaukums_kartei, statuss: p.statuss_kartei}};
-        l.setStyle({color: p.krasa_kartei, weight: 3.5, fillColor: p.krasa_kartei, fillOpacity: 0.25});
-        B.fg.addLayer(l);
-        B.pazinot(true);
+        B.pievienot(L.geoJSON(f.geometry).getLayers()[0],
+                    {nosaukums: p.nosaukums_kartei, statuss: p.statuss_kartei});
     }
     var slanis = L.geoJSON({{ this.dati }}, {
         style: function(f) { return f.properties.stils; },
@@ -681,11 +698,8 @@ _ZV_JS = Template("""
                 var B = window.BK || {};
                 if (!B.fg || B.aiznemts) return;
                 L.DomEvent.stopPropagation(e);
-                var l = L.geoJSON(f.geometry).getLayers()[0];
-                l.feature = {type: "Feature", properties: {nosaukums: "ZV " + f.properties.kadastrs,
-                                                           statuss: "Kailcirte"}};
-                B.fg.addLayer(l);
-                B.pazinot(true);
+                B.pievienot(L.geoJSON(f.geometry).getLayers()[0],
+                            {nosaukums: "ZV " + f.properties.kadastrs, statuss: "Kailcirte"});
             });
         }
     }).addTo(karte);
@@ -890,8 +904,19 @@ def _nogabalu_slanis() -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
-def uzbuvet_karti() -> folium.Map:
-    skats = ss.karte_skats_html or LATVIJA
+def kartes_ievade() -> dict:
+    """Viss, no kā atkarīgs kartes HTML (momentuzņēmums)."""
+    return {
+        "skats": ss.karte_skats_html, "pietuvinat": ss.karte_pietuvinat_html,
+        "fokuss": ss.get("karte_fokuss_html"), "objekti": [dict(o) for o in objekti],
+        "nogabali": json.dumps(_nogabalu_slanis(), ensure_ascii=False) if (inv and nog_robezas) else None,
+        "zv": [dict(z) for z in ss.karte_zv], "markieris": ss.get("karte_markieris"),
+    }
+
+
+def uzbuvet_karti(iev: dict) -> folium.Map:
+    objekti = iev["objekti"]
+    skats = iev["skats"] or LATVIJA
     m = folium.Map(location=skats["center"], zoom_start=skats["zoom"], tiles=None,
                    control_scale=True, max_zoom=21, prefer_canvas=False)
     _wms(PAMATKARTES[pamatkarte], 1.0, overlay=False).add_to(m)
@@ -899,18 +924,17 @@ def uzbuvet_karti() -> folium.Map:
         _wms(PARKLAJUMI[nos], caurspidigums, overlay=True).add_to(m)
 
     m.get_root().header.add_child(folium.Element(_STILS))
-    if ss.karte_zv:
+    if iev["zv"]:
         zv_fc = {"type": "FeatureCollection", "features": [
             {"type": "Feature", "geometry": z["geometry"], "properties": {
                 "kadastrs": z["kadastrs"],
                 "tooltip": f"Zemes vienība {z['kadastrs']}"
                            + (f" · {z['platiba_ha']:.2f} ha" if z["platiba_ha"] else "")
                            + " · klikšķis = iezīmēt visu ZV kā figūru"}}
-            for z in ss.karte_zv]}
+            for z in iev["zv"]]}
         m.add_child(_elements(_ZV_JS, dati=json.dumps(zv_fc, ensure_ascii=False)))
-    if inv and nog_robezas:
-        m.add_child(_elements(_NOGABALI_JS,
-                              dati=json.dumps(_nogabalu_slanis(), ensure_ascii=False)))
+    if iev["nogabali"]:
+        m.add_child(_elements(_NOGABALI_JS, dati=iev["nogabali"]))
     fg = folium.FeatureGroup(name="Objekti", control=False).add_to(m)
     dati = uz_geojson(objekti, ar_merijumiem=False)
     for f, o in zip(dati["features"], objekti):
@@ -944,20 +968,29 @@ def uzbuvet_karti() -> folium.Map:
                           flyTo=True, keepCurrentZoomLevel=False).add_to(m)
     plugins.MousePosition(position="bottomleft", separator=" , ", prefix="WGS84:",
                           num_digits=6).add_to(m)
-    if ss.get("karte_markieris"):
-        folium.Marker(ss.karte_markieris, tooltip="Meklētā vieta",
+    if iev["markieris"]:
+        folium.Marker(iev["markieris"], tooltip="Meklētā vieta",
                       icon=folium.Icon(color="red", icon="crosshairs", prefix="fa")).add_to(m)
-    if ss.karte_pietuvinat_html and (objekti or ss.karte_zv):
-        fokuss = ss.get("karte_fokuss_html")
-        merkis = ([z for z in ss.karte_zv if z["kadastrs"] in fokuss] if fokuss else []) \
-            or objekti + ss.karte_zv
+    if iev["pietuvinat"] and (objekti or iev["zv"]):
+        fokuss = iev["fokuss"]
+        merkis = ([z for z in iev["zv"] if z["kadastrs"] in fokuss] if fokuss else []) \
+            or objekti + iev["zv"]
         m.fit_bounds(robezas(merkis), padding=(30, 30), max_zoom=17)
     return m
 
 
 @st.fragment
 def kartes_fragments() -> None:
-    karte = uzbuvet_karti()
+    # Karti būvē no jauna tikai, ja mainās kas ārpus kartes (imports, tabula, slāņi, zemes vienība…).
+    # Izmaiņas, kas veiktas pašā kartē, tajā jau ir — pārzīmējot iframe pārlādētos un lapa "noraustītos".
+    atsl = (ss.karte_versija, pamatkarte, tuple(parklajumi), caurspidigums, uzraksti, aktiva_zv,
+            inv.zemes_vieniba if inv else None, len(nog_robezas), tuple(z["kadastrs"] for z in ss.karte_zv),
+            str(ss.get("karte_markieris")))
+    if ss.get("karte_html_atsl") != atsl or ss.get("karte_html_ievade") is None:
+        ss.karte_html_ievade = kartes_ievade()
+        ss.karte_html_atsl = atsl
+    # Tā pati ievade -> identisks HTML -> pārlūks karti nepārlādē
+    karte = uzbuvet_karti(ss.karte_html_ievade)
     rez = st_folium(karte, key="karte", height=640, use_container_width=True,
                     returned_objects=["all_drawings", "center", "zoom"])
     if not rez:
@@ -983,9 +1016,10 @@ def kartes_fragments() -> None:
                 izpilditi += dalas
             else:
                 izpilditi.append(o)
-        jauni = izpilditi
-        ss.karte_objekti = jauni
-        _mainits()
+        ss.karte_objekti = izpilditi
+        ss.karte_tabula_v = ss.get("karte_tabula_v", 0) + 1
+        if len(izpilditi) != len(jauni):
+            _mainits()           # sadale izveido jaunas figūras — tās jāuzzīmē
         st.rerun(scope="app")
 
 
@@ -1209,7 +1243,7 @@ else:
         ss.karte_versija += 1
 
     ids = [o["id"] for o in objekti]
-    atsl = f"karte_tabula_{ss.karte_versija}"
+    atsl = f"karte_tabula_{ss.karte_versija}_{ss.get('karte_tabula_v', 0)}"
     df = pd.DataFrame(rindas)
     nog_opcijas = list(nogabali.values())
     if nogabali:
