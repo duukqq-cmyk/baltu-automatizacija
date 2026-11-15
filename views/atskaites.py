@@ -11,7 +11,12 @@ import streamlit as st
 from atskaites.demo import demo_boardi
 from atskaites.eksports import excel_atskaite
 from atskaites.metrikas import (
-    Periods, aprekinat, iepriekseja_menesa_periods, tekosais_menesis, teksta_kopsavilkums,
+    Periods, aprekinat, iepriekseja_menesa_periods, nedelu_tendence, salidzinajuma_periods, tekosais_menesis,
+    teksta_kopsavilkums,
+)
+from atskaites.panelis import (
+    Kartite, cipi_html, josla_html, iemeslu_grafiks, kartites_html, laiku_df, laiku_grafiks, piltuves_df,
+    piltuves_grafiks, tendences_grafiks,
 )
 from atskaites.modelis import LAUKI, LAUKI_PEC_KEY, POSMI, POSMU_NOSAUKUMI, Konfiguracija, sagatavot, sodiena
 from atskaites.monday import MondayKlients, MondayKluda
@@ -166,21 +171,16 @@ with open(xlsx, "rb") as f:
 st.sidebar.download_button(":material/download: Teksta kopsavilkums", teksts, file_name="leadu_atskaite.txt",
                            use_container_width=True)
 
-st.subheader(f"Periods: {periods.nosaukums}")
-st.caption(f"{periods.no:%d.%m.%Y} – {periods.lidz:%d.%m.%Y} · {len(dati.boardi)} boardi · "
-           f"{len(dati.rindas)} monday rindas → {len(dati.leadi)} leadi (visā laikā)")
 vestures_no = [getattr(b, "vesture_no", None)[:10] for b in dati.boardi if getattr(b, "vesture_no", None)]
 vestures_kludas = [f"{b.nosaukums}: {b.vestures_kluda}" for b in dati.boardi if getattr(b, "vestures_kluda", None)]
-if dati.no_vestures:
-    st.caption(f":material/history: Posmu datumi ņemti no monday grupu vēstures (pārvietošana starp grupām). "
-               f"Vēsture pieejama no {min(vestures_no)[8:10]}.{min(vestures_no)[5:7]}.{min(vestures_no)[:4]} — "
-               "par agrāk pārvietotiem leadiem posmu datumu nav.")
-with st.expander(":material/history: monday vēstures diagnostika"):
-    for b in dati.boardi:
-        st.write(f"**{b.nosaukums}** — vēsture no {getattr(b, 'vesture_no', None) or '—'}; ierakstu veidi:",
-                 getattr(b, "zurnala_notikumi", {}) or "nav")
-        ar = sum(1 for r in b.rindas if getattr(r, "grupu_vesture", None))
-        st.caption(f"{ar} no {len(b.rindas)} rindām ir zināma ienākšana kādā grupā")
+st.subheader(f"{periods.nosaukums[:1].upper()}{periods.nosaukums[1:]}")
+josla = [("Periods", f"{periods.no:%d.%m.%Y} – {periods.lidz:%d.%m.%Y}"),
+         ("Boardi", ", ".join(b.nosaukums for b in dati.boardi)),
+         ("Leadi datubāzē", f"{len(dati.leadi)} (no {len(dati.rindas)} rindām)")]
+if dati.no_vestures and vestures_no:
+    v = min(vestures_no)
+    josla.append(("Posmu vēsture no", f"{v[8:10]}.{v[5:7]}.{v[:4]}"))
+st.html(josla_html(josla))
 if vestures_kludas:
     st.warning("Grupu vēsturi neizdevās nolasīt — " + "; ".join(vestures_kludas), icon=":material/history:")
 
@@ -189,29 +189,93 @@ tab_k, tab_a, tab_p, tab_l, tab_dk, tab_i = st.tabs(
      "Iestatījumi"])
 
 with tab_k:
-    sadalas: dict[str, list] = {}
-    for m in atsk.metriki:
-        sadalas.setdefault(m.sadala, []).append(m)
-    for sadala, metriki in sadalas.items():
-        st.markdown(f"**{sadala}**")
-        for i in range(0, len(metriki), 4):
-            kol = st.columns(4)
-            for c, m in zip(kol, metriki[i:i + 4]):
-                c.metric(m.nosaukums, _formatet(m.vertiba, m.vieniba), help=m.piezime or None)
-    if atsk.atteikuma_iemesli:
-        st.markdown("**Atteikuma iemesli**")
-        st.bar_chart(pd.DataFrame(atsk.atteikuma_iemesli, columns=["Iemesls", "Skaits"]).set_index("Iemesls"),
-                     horizontal=True)
-    trukst = {b: k for b, k in atsk.trukstosas_kolonnas.items() if k}
+    iepr_p = salidzinajuma_periods(periods, sod)
+    atsk_iepr = aprekinat(dati, iepr_p, sod)
+    tend = nedelu_tendence(dati, min(periods.lidz, sod), 12)
+
+    def _t(nos):  # nedēļu sērija sparklainam
+        return [r[nos] for r in tend]
+
+    def K(nos, isais, tend_nos=None, **kw):
+        m = next(m for m in atsk.metriki if m.nosaukums == nos)
+        vien = {"gab.": "", "EUR": "€"}.get(m.vieniba, m.vieniba)
+        kw.setdefault("vieniba", vien)
+        return Kartite(isais, m.vertiba, iepr=atsk_iepr.metriks(nos),
+                       tendence=_t(tend_nos) if tend_nos else None, paskaidrojums=m.piezime, **kw)
+
+    st.html(kartites_html([
+        K("Leadi kopā", "Jauni leadi", "Leadi", galvenais=True),
+        K("Kvalificēti objekti", "Kvalificēti", "Kvalificēti", galvenais=True),
+        K("Priekšvērtējumi", "Priekšvērtējumi", "Priekšvērtējumi", galvenais=True),
+        K("Apsekoti dabā", "Apsekoti dabā", "Apsekoti", galvenais=True),
+        K("Nopirkti objekti", "Nopirkti", "Nopirkti", galvenais=True),
+        K("Atteikti objekti", "Atteikti", "Atteikti", augsana_laba=False, galvenais=True),
+    ], iepr_p.nosaukums, "Galvenie rādītāji"))
+
+    st.html(kartites_html([
+        K("Kvalitatīvi", "Kvalitatīvi leadi"),
+        K("Mērķa", "Mērķa leadi"),
+        K("Proaktīvi", "Proaktīvi leadi"),
+        K("Sarunātas klātienes tikšanās", "Klātienes tikšanās"),
+        K("Priekšvērtējumi vidēji darba dienā", "Priekšvērtējumi dienā", vieniba="vid."),
+        K("t.sk. atjaunoti", "Atjaunoti leadi", augsana_laba=None),
+    ], iepr_p.nosaukums, "Leadu kvalitāte un aktivitāte"))
+
+    k1, k2 = st.columns([3, 2], gap="large")
+    with k1:
+        st.html(cipi_html("Piltuve periodā", []))
+        pdf = piltuves_df(atsk)
+        if len(pdf):
+            st.altair_chart(piltuves_grafiks(pdf), use_container_width=True)
+            st.caption("Cik objektu periodā sasniedza katru posmu, un cik % tas ir no periodā saņemtajiem leadiem.")
+    with k2:
+        st.html(cipi_html("Posmu ilgums (vidēji)", []))
+        ldf = laiku_df(atsk)
+        if len(ldf):
+            st.altair_chart(laiku_grafiks(ldf), use_container_width=True)
+        else:
+            st.caption("Periodā nav pāreju starp posmiem.")
+
+    k1, k2 = st.columns([3, 2], gap="large")
+    with k1:
+        st.html(cipi_html("Nedēļu dinamika (12 ned.)", []))
+        st.altair_chart(tendences_grafiks(tend), use_container_width=True)
+    with k2:
+        st.html(cipi_html("Atteikuma iemesli", []))
+        if atsk.atteikuma_iemesli and not (len(atsk.atteikuma_iemesli) == 1
+                                           and atsk.atteikuma_iemesli[0][0] == "Nav norādīts"):
+            st.altair_chart(iemeslu_grafiks(atsk.atteikuma_iemesli), use_container_width=True)
+        else:
+            n = sum(c for _, c in atsk.atteikuma_iemesli)
+            st.caption(f"{n} atteikumiem iemesls nav norādīts — boardā nav kolonnas 'Atteikuma iemesls'."
+                       if n else "Periodā atteikumu nav.")
+
+    st.html(kartites_html([
+        K("Apjoms", "Nopirktais apjoms"), K("Platība", "Nopirktā platība"),
+        K("Iegādes summa", "Iegādes summa"),
+        K("Cenas samazinājums pret maks. gala piedāvājumu", "Cenas samazinājums", augsana_laba=None),
+    ], iepr_p.nosaukums, "Pirkumi"))
+
+    trukst = sorted({k for kk in atsk.trukstosas_kolonnas.values() for k in kk})
     if trukst:
-        with st.expander("⚠ Daži metriki nav aprēķināmi — boardos trūkst kolonnu"):
-            for b, k in trukst.items():
-                st.write(f"**{b}:** " + ", ".join(k))
-            st.caption("Kolonnas var pievienot cilnē **Iestatījumi → Board standarts**.")
+        st.html(cipi_html("Trūkst boardā — šie rādītāji nav aprēķināmi",
+                          [(k, "Pievieno kolonnu: Iestatījumi → Board standarts") for k in trukst]))
 
 with tab_a:
     if atsk.pa_agentiem:
-        st.dataframe(pd.DataFrame(atsk.pa_agentiem), hide_index=True, use_container_width=True)
+        adf = pd.DataFrame(atsk.pa_agentiem)
+        mx = max(int(adf["Leadi"].max()), 1)
+        st.dataframe(
+            adf, hide_index=True, use_container_width=True,
+            column_config={
+                "Agents": st.column_config.TextColumn("Agents (boards)", width="medium"),
+                "Leadi": st.column_config.ProgressColumn("Leadi", format="%d", min_value=0, max_value=mx),
+                "Kvalificēti": st.column_config.ProgressColumn("Kvalificēti", format="%d", min_value=0, max_value=mx),
+                "Priekšvērtējumi": st.column_config.ProgressColumn("Priekšvērt.", format="%d", min_value=0,
+                                                                   max_value=mx),
+                "Nopirkts m³": st.column_config.NumberColumn("Nopirkts m³", format="%d"),
+                "Iegādes summa EUR": st.column_config.NumberColumn("Iegādes summa", format="€ %d"),
+            })
     else:
         st.info("Periodā nav datu.")
     st.caption("Lead pieder boardam (agentam), kurā tas parādījās pirmais.")
@@ -314,3 +378,10 @@ with tab_i:
         "(ne ss.com, Facebook, izsoles, portāli).\n"
         "- Katrs notikums periodā tiek skaitīts pēc sava datuma kolonnas."
     )
+
+    st.markdown("#### monday vēstures diagnostika")
+    for b in dati.boardi:
+        st.write(f"**{b.nosaukums}** — vēsture no {getattr(b, 'vesture_no', None) or '—'}; ierakstu veidi:",
+                 getattr(b, "zurnala_notikumi", {}) or "nav")
+        ar = sum(1 for r in b.rindas if getattr(r, "grupu_vesture", None))
+        st.caption(f"{ar} no {len(b.rindas)} rindām ir zināma ienākšana kādā grupā")

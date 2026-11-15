@@ -240,3 +240,25 @@ def test_grupa_procesa_un_follow_up():
     assert posms_no_teksta("LIZ debitori") == "citi"
     assert posms_no_teksta("Facebook PDF kampaņa - follow up") == "citi"
     assert posms_no_teksta("Manas tikšanās") == "tiksanas"
+
+
+def test_panelis_kartites_piltuve_tendence():
+    from atskaites.metrikas import nedelu_tendence, salidzinajuma_periods
+    from atskaites.panelis import (Kartite, kartites_html, laiku_df, piltuves_df, piltuves_grafiks,
+                                   tendences_grafiks)
+    sod = date(2026, 11, 15)
+    d = sagatavot(demo_boardi(sod))
+    p = menesis(2026, 11)
+    a = aprekinat(d, p, sod)
+    iepr = salidzinajuma_periods(p, sod)
+    assert (iepr.no, iepr.lidz) == (date(2026, 10, 1), date(2026, 10, 15))
+    tend = nedelu_tendence(d, sod, 12)
+    assert len(tend) == 12 and tend[-1]["Nedēļa"] == date(2026, 11, 9)
+    h = kartites_html([Kartite("Atteikti", 5, iepr=2, augsana_laba=False, tendence=[1, 2, 3]),
+                       Kartite("Mērķa", None)], iepr.nosaukums)
+    assert "▲ 3" in h and "slikts" in h and "nav datu" in h and "data:image/svg+xml;base64" in h
+    pdf = piltuves_df(a)
+    assert list(pdf["Posms"])[0] == "Leadi" and "no leadiem" in pdf["Etiķete"].iloc[1]
+    piltuves_grafiks(pdf).to_dict()
+    tendences_grafiks(tend).to_dict()
+    assert laiku_df(a)["Etiķete"].str.endswith(" d.").all()

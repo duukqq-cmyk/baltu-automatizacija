@@ -379,3 +379,46 @@ def iepriekseja_menesa_periods(sod: date | None = None) -> Periods:
     sod = sod or sodiena()
     pirm = sod.replace(day=1) - timedelta(days=1)
     return menesis(pirm.year, pirm.month)
+
+
+# --------------------------------------------------------------------------
+# Panelim: salīdzinājuma periods un nedēļu tendence
+# --------------------------------------------------------------------------
+_MEN_IS = ["janv.", "febr.", "marts", "apr.", "maijs", "jūn.", "jūl.", "aug.", "sept.", "okt.", "nov.", "dec."]
+
+
+def salidzinajuma_periods(p: Periods, sod: date | None = None) -> Periods:
+    """Iepriekšējais tikpat garš periods. Tekošajam mēnesim — tas pats dienu skaits iepriekšējā mēnesī
+    (1.–15. nov. ↔ 1.–15. okt.), lai nesalīdzina pusmēnesi ar pilnu mēnesi."""
+    sod = sod or sodiena()
+    lidz = min(p.lidz, sod) if p.no <= sod else p.lidz
+    pilns_menesis = p.no.day == 1 and p.lidz.day == calendar.monthrange(p.lidz.year, p.lidz.month)[1] \
+        and p.no.month == p.lidz.month
+    if pilns_menesis:
+        iepr_beigas = p.no - timedelta(days=1)
+        no = iepr_beigas.replace(day=1)
+        garums = (lidz - p.no).days
+        beigas = min(no + timedelta(days=garums), iepr_beigas)
+        if beigas == iepr_beigas:
+            return Periods(no, beigas, f"{_MEN_IS[no.month - 1]} {no.year}")
+        return Periods(no, beigas, f"{no.day}.–{beigas.day}. {_MEN_IS[no.month - 1]}")
+    garums = (lidz - p.no).days + 1
+    no = p.no - timedelta(days=garums)
+    return Periods(no, p.no - timedelta(days=1), f"{no:%d.%m.}–{p.no - timedelta(days=1):%d.%m.}")
+
+
+TENDENCES_NOTIKUMI = [("lead_datums", "Leadi"), ("kvalif_datums", "Kvalificēti"),
+                      ("priekszv_datums", "Priekšvērtējumi"), ("apsekots_datums", "Apsekoti"),
+                      ("nopirkts_datums", "Nopirkti"), ("atteikts_datums", "Atteikti")]
+
+
+def nedelu_tendence(dati: Dati, lidz: date, nedelas: int = 12) -> list[dict]:
+    """Notikumu skaits pa kalendāra nedēļām (pirmdiena–svētdiena), pēdējās N nedēļas līdz 'lidz'."""
+    sakums = lidz - timedelta(days=lidz.weekday()) - timedelta(weeks=nedelas - 1)
+    rez = {sakums + timedelta(weeks=i): {n: 0 for _, n in TENDENCES_NOTIKUMI} for i in range(nedelas)}
+    for l in dati.leadi:
+        for key, nos in TENDENCES_NOTIKUMI:
+            d = l.get(key)
+            if d and sakums <= d <= lidz:
+                rez[d - timedelta(days=d.weekday())][nos] += 1
+    return [{"Nedēļa": w, **v} for w, v in sorted(rez.items())]
