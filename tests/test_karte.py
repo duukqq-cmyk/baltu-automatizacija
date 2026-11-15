@@ -393,3 +393,30 @@ def test_automatiskas_cirsmas_sadala_lielu_nogabalu():
     bez_joslas[1] = dict(bez_joslas[1], geometry=wgs_geometrija(b.buffer(60).difference(a.buffer(-0.5)).intersection(
         lks_geometrija(g))))
     assert blakus_kailcirsu_bridinajumi(bez_joslas, inv, {n.apzimejums: g})
+
+
+def test_apvienot_statuss_un_jauna_figura_no_kartes():
+    """Kartes izvēlne maina statusu; klikšķis uz nogabala pievieno figūru ar nosaukumu/statusu."""
+    from karte.geometrija import apvienot_ar_zimejumiem
+    o = jauns_objekts(_kvadrats_lks(500_000, 300_000, 100), "Cirsma 1")
+    zim = [{"type": "Feature", "geometry": o["geometry"],
+            "properties": {"id": o["id"], "statuss": "Kopšanas cirte", "darbiba": "sadalit"}},
+           {"type": "Feature", "geometry": _kvadrats_lks(501_000, 300_000, 50),
+            "properties": {"nosaukums": "Cirsma 3.kv. 9", "statuss": "Kailcirte"}}]
+    jauni, mainits = apvienot_ar_zimejumiem([o], zim)
+    assert mainits and jauni[0]["statuss"] == "Kopšanas cirte" and jauni[0]["darbiba"] == "sadalit"
+    assert jauni[1]["nosaukums"] == "Cirsma 3.kv. 9" and jauni[1]["statuss"] == "Kailcirte"
+    # dzēsts kartē -> pazūd
+    jauni2, m2 = apvienot_ar_zimejumiem([o], [])
+    assert m2 and jauni2 == []
+
+
+def test_sadalit_objektu_pec_izvelnes():
+    from karte.geometrija import mervienibas
+    from karte.parrekins import sadalit_objektu
+    o = jauns_objekts(_kvadrats_lks(500_000, 300_000, (3.2 * 10_000) ** 0.5), "Cirsma X")
+    dalas = sadalit_objektu(o, None, None)          # nav meža tipa -> stingrākais limits 2 ha
+    assert [d["statuss"] for d in dalas] == ["Kailcirte", "Atdalošā josla", "Kailcirte"]
+    assert [round(mervienibas(d["geometry"])["platiba_ha"], 2) for d in dalas] == pytest.approx([2.0, 0.5, 0.7], abs=0.01)
+    mazs = jauns_objekts(_kvadrats_lks(500_000, 300_000, 100), "Mazs")   # 1 ha
+    assert sadalit_objektu(mazs, None, None) == [mazs]

@@ -165,40 +165,62 @@ def automatiskas_cirsmas(inv: Inventarizacija, nogabalu_robezas: dict[str, dict]
             objekti.append(jauns_objekts(wgs_geometrija(g), f"Kopšana {apz}", statuss="Kopšanas cirte"))
             continue
         max_ha, _ = max_kailcirtes_platiba(n.meza_tips, nt)
-        cirtes, _ = sadalit_kailcirtes(g.area / 10_000, max_ha, nt)
-        if len(cirtes) == 1:
-            if g.area / 10_000 > max_ha + 0.005:   # atlikums < min — nogriež lieko
-                gabali = sadalit_poligonu(g, [cirtes[0]])
-                objekti.append(jauns_objekts(wgs_geometrija(gabali[0]), f"Cirsma {apz}",
-                                             statuss=CIRSMAS_STATUSS))
-                if gabali[1].area > 1:
-                    objekti.append(jauns_objekts(wgs_geometrija(gabali[1]), f"Atlikums {apz}",
-                                                 statuss="Neiekļaut",
-                                                 piezimes="Pārāk mazs nākamajai kailcirtei"))
-            else:
-                objekti.append(jauns_objekts(wgs_geometrija(g), f"Cirsma {apz}", statuss=CIRSMAS_STATUSS))
-            continue
-        platibas: list[float] = []
+        objekti += sagriezt_kailcirti(g, max_ha, nt, apz)
+    return objekti
+
+
+def sagriezt_kailcirti(g, max_ha: float, nt: Noteikumi = NOKLUSEJUMA_NOTEIKUMI,
+                       apz: str = "") -> list[dict]:
+    """LKS-92 laukums -> kailcirte(s) ≤ max_ha + atdalošās joslas (+ neizcērtams atlikums)."""
+    nos = f" {apz}" if apz else ""
+    platiba = g.area / 10_000
+    cirtes, _ = sadalit_kailcirtes(platiba, max_ha, nt)
+    if len(cirtes) == 1:
+        if platiba <= max_ha + 0.005:
+            return [jauns_objekts(wgs_geometrija(g), f"Cirsma{nos}", statuss=CIRSMAS_STATUSS)]
+        platibas = [cirtes[0]]
+    else:
+        platibas = []
         for i, c in enumerate(cirtes):
             platibas.append(c)
             if i < len(cirtes) - 1:
                 platibas.append(nt.atdalosa_josla_ha)
-        gabali = sadalit_poligonu(g, platibas)
-        nr = 0
-        for i, gab in enumerate(gabali):
-            if gab.area < 1:
-                continue
-            if i < len(platibas) and i % 2 == 0:
-                nr += 1
-                objekti.append(jauns_objekts(wgs_geometrija(gab), f"Cirsma {apz} ({nr})",
-                                             statuss=CIRSMAS_STATUSS))
-            elif i < len(platibas):
-                objekti.append(jauns_objekts(wgs_geometrija(gab), f"Josla {apz}", statuss=JOSLAS_STATUSS,
-                                             piezimes="Atdalošā josla starp kailcirtēm (netiek cirsta)"))
-            else:
-                objekti.append(jauns_objekts(wgs_geometrija(gab), f"Atlikums {apz}", statuss="Neiekļaut",
-                                             piezimes="Pārāk mazs nākamajai kailcirtei"))
-    return objekti
+    rez, nr = [], 0
+    for i, gab in enumerate(sadalit_poligonu(g, platibas)):
+        if gab.area < (100 if i >= len(platibas) else 1):   # < 0,01 ha atlikums — griešanas paliekas
+            continue
+        if i < len(platibas) and i % 2 == 0:
+            nr += 1
+            suff = f" ({nr})" if len(cirtes) > 1 else ""
+            rez.append(jauns_objekts(wgs_geometrija(gab), f"Cirsma{nos}{suff}", statuss=CIRSMAS_STATUSS))
+        elif i < len(platibas):
+            rez.append(jauns_objekts(wgs_geometrija(gab), f"Josla{nos}", statuss=JOSLAS_STATUSS,
+                                     piezimes="Atdalošā josla starp kailcirtēm (netiek cirsta)"))
+        else:
+            rez.append(jauns_objekts(wgs_geometrija(gab), f"Atlikums{nos}", statuss="Neiekļaut",
+                                     piezimes="Pārāk mazs nākamajai kailcirtei"))
+    return rez
+
+
+def sadalit_objektu(o: dict, inv: Inventarizacija | None, nogabalu_robezas: dict[str, dict] | None,
+                    nt: Noteikumi = NOKLUSEJUMA_NOTEIKUMI) -> list[dict]:
+    """Kartes laukumu sadala kailcirtēs ar atdalošo joslu (izvēlne "Sadalīt ar joslu").
+
+    Limits — pēc nogabala, kurā ir lielākā laukuma daļa (meža tips); nezināms -> stingrākais.
+    """
+    if not ir_laukums(o):
+        return [o]
+    g = lks_geometrija(o["geometry"])
+    apz = o.get("nogabals")
+    if not apz and nogabalu_robezas:
+        dalas = uzmeritas_dalas([dict(o, statuss=CIRSMAS_STATUSS)], nogabalu_robezas)
+        apz = max(dalas, key=lambda k: sum(dalas[k])) if dalas else None
+    tips = next((n.meza_tips for n in inv.nogabali if n.apzimejums == apz), None) if (inv and apz) else None
+    max_ha, _ = max_kailcirtes_platiba(tips, nt)
+    if g.area / 10_000 <= max_ha + 0.005:
+        return [o]
+    nos = o["nosaukums"].removeprefix("Cirsma").strip() or (apz or "")
+    return sagriezt_kailcirti(g, max_ha, nt, nos)
 
 
 def blakus_kailcirsu_bridinajumi(objekti: list[dict], inv: Inventarizacija | None,

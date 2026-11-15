@@ -31,7 +31,7 @@ from karte.mvr import MvrKluda, lejupieladet_teritoriju, nogabali_no_faila
 from karte.mvr import robezas as mvr_robezas, uz_inventarizaciju
 from karte.parrekins import (
     CIRSMAS_STATUSS, automatiskas_cirsmas, blakus_kailcirsu_bridinajumi, labojumi_no_kartes,
-    nogabalu_saraksts, objekta_sadalijums, salidzinat, uzmeritas_visas,
+    nogabalu_saraksts, objekta_sadalijums, sadalit_objektu, salidzinat, uzmeritas_visas,
 )
 from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla
 from karte.slani import ATRIBUCIJA, NOKLUSETIE_PARKLAJUMI, PAMATKARTES, PARKLAJUMI
@@ -334,6 +334,71 @@ _OBJEKTI_JS = Template("""
 (function() {
     var fc = {{ this.dati }};
     var fg = {{ this.fg_el.get_name() }};
+    var karte = {{ this._parent.get_name() }};
+    var STATUSI = {{ this.statusi }};
+    var LAUKUMA_STATUSI = ["Kailcirte", "Kopšanas cirte", "Izlases cirte"];
+    var BK = window.BK = {karte: karte, fg: fg, izvelets: null, aiznemts: false};
+
+    // ---- Paziņošana Python pusei (streamlit-folium nolasa visus fg objektus) ----------
+    var taimeris = null;
+    BK.pazinot = function(uzreiz) {
+        clearTimeout(taimeris);
+        taimeris = setTimeout(function() {
+            karte.fire("draw:edited", {layers: L.layerGroup()});
+        }, uzreiz ? 0 : 700);
+    };
+
+    // ---- Stils un izvēle -----------------------------------------------------------
+    function krasa(l) { return (l.feature && l.feature.properties.krasa) || "#ff4b4b"; }
+    function bazesStils(l) { return {color: krasa(l), weight: 3.5, fillColor: krasa(l),
+                                    fillOpacity: 0.25, dashArray: null}; }
+    function izvelesStils(l) { return {color: "#ffffff", weight: 5, fillColor: krasa(l),
+                                       fillOpacity: 0.4, dashArray: "8 6"}; }
+    BK.izveleties = function(l) {
+        if (BK.izvelets && BK.izvelets !== l && BK.izvelets.setStyle) BK.izvelets.setStyle(bazesStils(BK.izvelets));
+        BK.izvelets = l;
+        if (l && l.setStyle) l.setStyle(izvelesStils(l));
+        fg.eachLayer(function(x) { if (x.setStyle) {
+            x.options.editing = L.extend({}, BK.izvelets === x ? izvelesStils(x) : bazesStils(x));
+            x.options.original = L.extend({}, x.options.editing); } });
+        if (BK.atjaunotRikus) BK.atjaunotRikus();
+    };
+
+    // ---- Uzraksts (atjaunojas uzreiz pēc virsotnes pārvilkšanas) ---------------------
+    function gredzeni(ll) {
+        if (!ll.length) return [];
+        if (ll[0] instanceof L.LatLng) return [ll];
+        return ll.reduce(function(a, x) { return a.concat(gredzeni(x)); }, []);
+    }
+    function garumsTeksts(d) { return d < 1000 ? d.toFixed(d < 100 ? 1 : 0) + " m" : (d / 1000).toFixed(2) + " km"; }
+    function atjaunotUzrakstu(l) {
+        if (!(l instanceof L.Polygon) || !L.GeometryUtil || !l.getTooltip()) return;
+        var r = gredzeni(l.getLatLngs()), ha = 0, p = 0;
+        r.forEach(function(g, i) {
+            var a = L.GeometryUtil.geodesicArea(g) / 10000;
+            ha += i === 0 ? a : 0;
+            for (var j = 0; j < g.length; j++) p += karte.distance(g[j], g[(j + 1) % g.length]);
+        });
+        var nos = (l.feature && l.feature.properties.nosaukums) || "Laukums";
+        l.setTooltipContent(nos + " · " + ha.toFixed(2) + " ha · " + garumsTeksts(p));
+    }
+
+    // ---- Objekti ---------------------------------------------------------------------
+    function piesaistit(layer) {
+        layer.on("click", function(e) {
+            if (BK.aiznemts) return;
+            L.DomEvent.stopPropagation(e);
+            BK.izveleties(layer);
+        });
+        layer.on("contextmenu", function(e) {
+            L.DomEvent.stopPropagation(e);
+            if (e.originalEvent) e.originalEvent.preventDefault();
+            if (BK.aiznemts) return;
+            BK.izveleties(layer);
+            BK.izvelne(e.containerPoint, layer);
+        });
+        layer.on("edit", function() { atjaunotUzrakstu(layer); BK.pazinot(); });
+    }
     L.geoJSON(fc, {
         style: function(f) { return {color: f.properties.krasa, weight: 3.5,
                                      fillColor: f.properties.krasa, fillOpacity: 0.25}; },
@@ -342,49 +407,189 @@ _OBJEKTI_JS = Template("""
             layer.bindTooltip(f.properties.etikete,
                 {permanent: {{ this.pastavigi }}, direction: "center", className: "karte-etikete"});
             fg.addLayer(layer);
+            piesaistit(layer);
         }
     });
+    karte.on("draw:created", function(e) { setTimeout(function() { piesaistit(e.layer); }, 0); });
+
+    // ---- Virsotņu vilkšana bez rīka (no 15. tuvinājuma) -------------------------------
+    var REDIGET_NO = 16;
+    function redigesana() {
+        var var_ = karte.getZoom() >= REDIGET_NO && !BK.aiznemts;
+        fg.eachLayer(function(l) {
+            if (!l.editing) return;
+            if (l.setStyle) {   // Leaflet.draw sagaida stilus, ko parasti iestata tā rīkjosla
+                var st = BK.izvelets === l ? izvelesStils(l) : bazesStils(l);
+                l.options.editing = L.extend({}, st);
+                l.options.original = L.extend({}, st);
+            }
+            try { if (var_) { l.editing.enable(); } else { l.editing.disable(); } }
+            catch (err) { if (window.console) console.warn("rediģēšana", err); }
+        });
+        zimetGarumus();
+    }
+    karte.on("zoomend", redigesana);
+    karte.on("draw:drawstart draw:deletestart measurestart", function() { BK.aiznemts = true; redigesana(); });
+    karte.on("draw:drawstop draw:deletestop measurefinish", function() {
+        setTimeout(function() { BK.aiznemts = false; redigesana(); }, 50); });
+    karte.on("draw:deleted", function() { BK.pazinot(true); });
+    karte.on("click", function() { if (!BK.aiznemts) BK.izveleties(null); BK.aizvertIzvelni(); });
+    setTimeout(redigesana, 300);
+
     // Pastāvīgie uzraksti jāpārvieto, kad kartes izmērs mainās (iframe ielāde)
-    var karte = {{ this._parent.get_name() }};
     function atjaunot() { fg.eachLayer(function(l) {
         if (l.getTooltip && l.getTooltip() && {{ this.pastavigi }}) { l.closeTooltip(); l.openTooltip(); } }); }
     karte.on("resize zoomend", atjaunot);
     setTimeout(atjaunot, 400);
 
-    // Malu garumi un virsotnes (kā LVM GEO) — atjaunojas arī labošanas laikā
+    // ---- Malu garumi (kā LVM GEO) ----------------------------------------------------
     var garumi = L.layerGroup().addTo(karte);
-    function gredzeni(ll) {
-        if (!ll.length) return [];
-        if (ll[0] instanceof L.LatLng) return [ll];
-        return ll.reduce(function(a, x) { return a.concat(gredzeni(x)); }, []);
-    }
-    function teksts(d) { return d < 1000 ? d.toFixed(d < 100 ? 1 : 0) + " m" : (d / 1000).toFixed(2) + " km"; }
     function zimetGarumus() {
         garumi.clearLayers();
         if (karte.getZoom() < 14) return;
+        var rediget = karte.getZoom() >= REDIGET_NO && !BK.aiznemts;
         fg.eachLayer(function(l) {
             if (!(l instanceof L.Polyline)) return;
             var slegts = l instanceof L.Polygon;
             gredzeni(l.getLatLngs()).forEach(function(r) {
                 var n = r.length;
                 for (var i = 0; i < n; i++) {
-                    L.circleMarker(r[i], {radius: 5, color: "#fff", weight: 2, fillColor: "#ff4b4b",
-                                          fillOpacity: 1, interactive: false}).addTo(garumi);
+                    if (!rediget) {   // rediģējot virsotnes zīmē pats rīks
+                        L.circleMarker(r[i], {radius: 5, color: "#fff", weight: 2, fillColor: "#ff4b4b",
+                                              fillOpacity: 1, interactive: false}).addTo(garumi);
+                    }
                     if (!slegts && i === n - 1) break;
                     var a = r[i], b = r[(i + 1) % n], d = karte.distance(a, b);
                     if (d < 3) continue;
                     var px = karte.latLngToLayerPoint(a).distanceTo(karte.latLngToLayerPoint(b));
                     if (px < 45) continue;   // pārāk īsa mala šajā mērogā
                     L.marker(L.latLng((a.lat + b.lat) / 2, (a.lng + b.lng) / 2), {interactive: false,
-                        icon: L.divIcon({className: "seg-garums", html: "<span>" + teksts(d) + "</span>",
+                        icon: L.divIcon({className: "seg-garums", html: "<span>" + garumsTeksts(d) + "</span>",
                                          iconSize: null})}).addTo(garumi);
                 }
             });
         });
     }
-    karte.on("zoomend draw:created draw:edited draw:deleted draw:editvertex draw:editmove " +
+    karte.on("draw:created draw:edited draw:deleted draw:editvertex draw:editmove " +
              "draw:editresize draw:editstop draw:deletestop", function() { setTimeout(zimetGarumus, 0); });
+    fg.on("edit", function() { setTimeout(zimetGarumus, 0); });
     setTimeout(zimetGarumus, 450);
+
+    // ---- Darbības ar figūru (kopīgas labā taustiņa izvēlnei un rīkjoslai) ------------
+    BK.dzest = function(l) {
+        if (!l) return;
+        if (l.editing) { try { l.editing.disable(); } catch (err) {} }
+        fg.removeLayer(l);
+        BK.izvelets = null; BK.aizvertIzvelni(); BK.atjaunotRikus(); zimetGarumus();
+        BK.pazinot(true);
+    };
+    BK.statuss = function(l, s) {
+        if (!l || !l.feature) return;
+        l.feature.properties.statuss = s;
+        l.feature.properties.krasa = STATUSI[s] || "#14b8a6";
+        if (l.setStyle) l.setStyle(BK.izvelets === l ? izvelesStils(l) : bazesStils(l));
+        BK.aizvertIzvelni();
+        BK.pazinot(true);
+    };
+    BK.sadalit = function(l) {
+        if (!l || !l.feature || !(l instanceof L.Polygon)) return;
+        l.feature.properties.darbiba = "sadalit";
+        BK.aizvertIzvelni();
+        BK.pazinot(true);
+    };
+    BK.pietuvinat = function(l) {
+        if (!l) return;
+        if (l.getBounds) { karte.fitBounds(l.getBounds(), {padding: [40, 40], maxZoom: 18}); }
+        else if (l.getLatLng) { karte.setView(l.getLatLng(), 18); }
+        BK.aizvertIzvelni();
+    };
+
+    // ---- Labā taustiņa izvēlne -------------------------------------------------------
+    var izv = L.DomUtil.create("div", "bk-izvelne", karte.getContainer());
+    izv.style.display = "none";
+    L.DomEvent.disableClickPropagation(izv);
+    L.DomEvent.disableScrollPropagation(izv);
+    L.DomEvent.on(izv, "contextmenu", L.DomEvent.preventDefault);
+    BK.aizvertIzvelni = function() { izv.style.display = "none"; };
+    function punkts(teksts, fn, papild) {
+        var a = L.DomUtil.create("div", "bk-punkts" + (papild ? " " + papild : ""), izv);
+        a.innerHTML = teksts;
+        L.DomEvent.on(a, "click", function(ev) { L.DomEvent.stop(ev); fn(); });
+        return a;
+    }
+    BK.izvelne = function(pt, l, papildPunkti) {
+        izv.innerHTML = "";
+        if (l) {
+            var p = l.feature ? l.feature.properties : {};
+            L.DomUtil.create("div", "bk-virsraksts", izv).innerHTML = p.nosaukums || "Objekts";
+            if (l instanceof L.Polygon) {
+                L.DomUtil.create("div", "bk-grupa", izv).innerHTML = "Statuss";
+                Object.keys(STATUSI).forEach(function(s) {
+                    punkts("<i style='background:" + STATUSI[s] + "'></i>" + s + (p.statuss === s ? " ✓" : ""),
+                           function() { BK.statuss(l, s); }, p.statuss === s ? "bk-aktivs" : "");
+                });
+                L.DomUtil.create("div", "bk-atdalitajs", izv);
+                punkts("✂️ Sadalīt ar atdalošo joslu", function() { BK.sadalit(l); });
+            }
+            punkts("🔍 Pietuvināt", function() { BK.pietuvinat(l); });
+            L.DomUtil.create("div", "bk-atdalitajs", izv);
+            punkts("🗑 Dzēst figūru", function() { BK.dzest(l); }, "bk-bistams");
+        }
+        (papildPunkti || []).forEach(function(x) { punkts(x[0], x[1]); });
+        izv.style.display = "block";
+        var c = karte.getSize();
+        izv.style.left = Math.min(pt.x, c.x - izv.offsetWidth - 6) + "px";
+        izv.style.top = Math.min(pt.y, c.y - izv.offsetHeight - 6) + "px";
+    };
+    document.addEventListener("keydown", function(ev) {
+        if (ev.key === "Escape") { BK.aizvertIzvelni(); BK.izveleties(null); }
+        if ((ev.key === "Delete" || ev.key === "Backspace") && BK.izvelets && !BK.aiznemts
+            && !/input|textarea/i.test((ev.target || {}).tagName || "")) { BK.dzest(BK.izvelets); }
+    });
+
+    // ---- Rīkjosla kreisajā pusē: tās pašas darbības izvēlētajai figūrai ---------------
+    var Riki = L.Control.extend({
+        options: {position: "topleft"},
+        onAdd: function() {
+            var c = L.DomUtil.create("div", "leaflet-bar bk-riki");
+            L.DomEvent.disableClickPropagation(c);
+            function poga(ikona, nos, fn) {
+                var a = L.DomUtil.create("a", "", c);
+                a.href = "#"; a.innerHTML = ikona; a.title = nos;
+                L.DomEvent.on(a, "click", function(ev) {
+                    L.DomEvent.stop(ev);
+                    if (!BK.izvelets) { BK.padoms(a); return; }
+                    fn(BK.izvelets, a);
+                });
+                return a;
+            }
+            this.pogas = [
+                poga("🏷", "Mainīt statusu (cirtes veidu)", function(l, a) {
+                    var r = a.getBoundingClientRect(), k = karte.getContainer().getBoundingClientRect();
+                    BK.izvelne(L.point(r.right - k.left + 6, r.top - k.top), l);
+                }),
+                poga("✂️", "Sadalīt kailcirti ar atdalošo joslu", function(l) { BK.sadalit(l); }),
+                poga("🔍", "Pietuvināt izvēlētajai figūrai", function(l) { BK.pietuvinat(l); }),
+                poga("🗑", "Dzēst izvēlēto figūru (arī Delete taustiņš)", function(l) { BK.dzest(l); }),
+            ];
+            BK.atjaunotRikus = function() {
+                this.pogas.forEach(function(a) { a.classList.toggle("bk-izslegts", !BK.izvelets); });
+            }.bind(this);
+            BK.atjaunotRikus();
+            return c;
+        }
+    });
+    new Riki().addTo(karte);
+    var padomsEl = L.DomUtil.create("div", "bk-padoms", karte.getContainer());
+    padomsEl.style.display = "none";
+    BK.padoms = function(a) {
+        var r = a.getBoundingClientRect(), k = karte.getContainer().getBoundingClientRect();
+        padomsEl.innerHTML = "Vispirms izvēlies figūru: klikšķini uz tās (vai labais taustiņš)";
+        padomsEl.style.left = (r.right - k.left + 8) + "px";
+        padomsEl.style.top = (r.top - k.top + 4) + "px";
+        padomsEl.style.display = "block";
+        setTimeout(function() { padomsEl.style.display = "none"; }, 2200);
+    };
 })();
 {% endmacro %}
 """)
@@ -393,12 +598,53 @@ _NOGABALI_JS = Template("""
 {% macro script(this, kwargs) %}
 (function() {
     var karte = {{ this._parent.get_name() }};
+    function bk() { return window.BK || {}; }
+    // Klikšķis uz nogabala -> rediģējama robežfigūra (tāda pati kā "Iezīmēt kā cirsmu")
+    function izveidot(f) {
+        var B = bk();
+        if (!B.fg || B.aiznemts) return;
+        var p = f.properties;
+        var l = L.geoJSON(f.geometry).getLayers()[0];
+        l.feature = {type: "Feature", properties: {nosaukums: p.nosaukums_kartei, statuss: p.statuss_kartei}};
+        l.setStyle({color: p.krasa_kartei, weight: 3.5, fillColor: p.krasa_kartei, fillOpacity: 0.25});
+        B.fg.addLayer(l);
+        B.pazinot(true);
+    }
     var slanis = L.geoJSON({{ this.dati }}, {
         style: function(f) { return f.properties.stils; },
         onEachFeature: function(f, layer) {
             layer.bindTooltip(f.properties.uzraksts, {permanent: true, direction: "center",
                                                      className: "nog-etikete"});
-            layer.bindPopup(f.properties.popup, {maxWidth: 360});
+            layer.on("mouseover", function() {
+                if (bk().aiznemts) return;
+                layer.setStyle({weight: 3.5, color: "#ffffff", opacity: 1});
+                var el = layer.getElement && layer.getElement();
+                if (el) el.classList.add("nog-spid");
+            });
+            layer.on("mouseout", function() {
+                slanis.resetStyle(layer);
+                var el = layer.getElement && layer.getElement();
+                if (el) el.classList.remove("nog-spid");
+            });
+            layer.on("click", function(e) {
+                if (bk().aiznemts) return;
+                L.DomEvent.stopPropagation(e);
+                izveidot(f);
+            });
+            layer.on("contextmenu", function(e) {
+                L.DomEvent.stopPropagation(e);
+                if (e.originalEvent) e.originalEvent.preventDefault();
+                var B = bk();
+                if (!B.izvelne || B.aiznemts) return;
+                B.izveleties(null);
+                B.izvelne(e.containerPoint, null, [
+                    ["➕ Iezīmēt nogabalu kā figūru", function() { B.aizvertIzvelni(); izveidot(f); }],
+                    ["ℹ️ Nogabala dati", function() {
+                        B.aizvertIzvelni();
+                        L.popup({maxWidth: 360}).setLatLng(e.latlng).setContent(f.properties.popup).openOn(karte);
+                    }],
+                ]);
+            });
         }
     }).addTo(karte);
     slanis.bringToBack();
@@ -409,6 +655,40 @@ _NOGABALI_JS = Template("""
     }
     karte.on("zoomend resize", redzamiba);
     setTimeout(redzamiba, 400);
+})();
+{% endmacro %}
+""")
+
+_ZV_JS = Template("""
+{% macro script(this, kwargs) %}
+(function() {
+    var karte = {{ this._parent.get_name() }};
+    var STILS = {color: "#facc15", weight: 3.5, dashArray: "8 5", fill: false, opacity: 1};
+    L.geoJSON({{ this.dati }}, {
+        style: function() { return STILS; },
+        onEachFeature: function(f, layer) {
+            layer.bindTooltip(f.properties.tooltip, {sticky: true});
+            layer.on("mouseover", function() {
+                if ((window.BK || {}).aiznemts) return;
+                layer.setStyle({weight: 6, dashArray: null});
+                var el = layer.getElement && layer.getElement(); if (el) el.classList.add("nog-spid");
+            });
+            layer.on("mouseout", function() {
+                layer.setStyle(STILS);
+                var el = layer.getElement && layer.getElement(); if (el) el.classList.remove("nog-spid");
+            });
+            layer.on("click", function(e) {
+                var B = window.BK || {};
+                if (!B.fg || B.aiznemts) return;
+                L.DomEvent.stopPropagation(e);
+                var l = L.geoJSON(f.geometry).getLayers()[0];
+                l.feature = {type: "Feature", properties: {nosaukums: "ZV " + f.properties.kadastrs,
+                                                           statuss: "Kailcirte"}};
+                B.fg.addLayer(l);
+                B.pazinot(true);
+            });
+        }
+    }).addTo(karte);
 })();
 {% endmacro %}
 """)
@@ -488,8 +768,11 @@ _STILS = """
 .karte-etikete:before {display: none;}
 .leaflet-draw-tooltip {font-size: 12px;}
 .leaflet-editing-icon, .karte-virsotne {border-radius: 50% !important; background: #ff4b4b !important;
-  border: 2px solid #fff !important; box-shadow: 0 0 0 1px rgba(0,0,0,.35);}
-.leaflet-editing-icon.leaflet-middle-icon {opacity: .55 !important;}
+  border: 2px solid #fff !important; box-shadow: 0 0 0 1px rgba(0,0,0,.35);
+  width: 11px !important; height: 11px !important; margin-left: -5.5px !important; margin-top: -5.5px !important;
+  cursor: move;}
+.leaflet-editing-icon.leaflet-middle-icon {opacity: .5 !important; width: 8px !important; height: 8px !important;
+  margin-left: -4px !important; margin-top: -4px !important; background: #fff !important; cursor: copy;}
 .leaflet-draw-guide-dash {background-color: #ff4b4b !important; border-radius: 50%;}
 .seg-garums span {background: rgba(17,24,39,.82); color: #fff; font: 600 11px/1 system-ui, sans-serif;
   padding: 2px 4px; border-radius: 3px; white-space: nowrap; transform: translate(-50%, -50%);
@@ -498,6 +781,24 @@ _STILS = """
   font: 700 11px/1 system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; padding: 0;}
 .nog-etikete:before {display: none;}
 .nog-popup td {padding: 1px 6px 1px 0; vertical-align: top; font-size: 12px;}
+.nog-spid {filter: drop-shadow(0 0 4px rgba(255,255,255,.9)) drop-shadow(0 0 9px rgba(255,255,255,.55));
+  cursor: pointer;}
+.bk-izvelne {position: absolute; z-index: 1000; min-width: 210px; background: #fff; border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,.28); padding: 4px 0; font: 13px/1.3 system-ui, sans-serif; color: #111;}
+.bk-virsraksts {font-weight: 700; padding: 6px 12px 4px; border-bottom: 1px solid #eee; margin-bottom: 2px;
+  max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;}
+.bk-grupa {font-size: 11px; color: #6b7280; padding: 4px 12px 2px; text-transform: uppercase; letter-spacing: .03em;}
+.bk-punkts {padding: 5px 12px; cursor: pointer; white-space: nowrap;}
+.bk-punkts:hover {background: #f3f4f6;}
+.bk-punkts i {display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px;
+  vertical-align: -1px;}
+.bk-aktivs {font-weight: 600;}
+.bk-bistams {color: #dc2626;}
+.bk-atdalitajs {height: 1px; background: #eee; margin: 3px 0;}
+.bk-riki a {font-size: 15px; line-height: 30px !important;}
+.bk-riki a.bk-izslegts {opacity: .4;}
+.bk-padoms {position: absolute; z-index: 1000; background: rgba(17,24,39,.9); color: #fff;
+  font: 12px system-ui, sans-serif; padding: 5px 8px; border-radius: 4px; white-space: nowrap;}
 .nog-popup td:first-child {color: #666; white-space: nowrap;}
 </style>
 """
@@ -581,8 +882,11 @@ def _nogabalu_slanis() -> dict:
                      "fillColor": "#4ade80"}
         else:
             stils = {"color": "#ffffff", "weight": 1.2, "opacity": 0.9, "fillOpacity": 0.02}
+        statuss = "Kopšanas cirte" if (v0 is not None and v0.cirtes_veids == "kopsana") else CIRSMAS_STATUSS
         features.append({"type": "Feature", "geometry": g, "properties": {
-            "stils": stils, "uzraksts": str(n.nr), "popup": _nog_popup(n, apz)}})
+            "stils": stils, "uzraksts": str(n.nr), "popup": _nog_popup(n, apz),
+            "nosaukums_kartei": ("Kopšana " if statuss != CIRSMAS_STATUSS else "Cirsma ") + apz,
+            "statuss_kartei": statuss, "krasa_kartei": STATUSI[statuss]}})
     return {"type": "FeatureCollection", "features": features}
 
 
@@ -595,14 +899,15 @@ def uzbuvet_karti() -> folium.Map:
         _wms(PARKLAJUMI[nos], caurspidigums, overlay=True).add_to(m)
 
     m.get_root().header.add_child(folium.Element(_STILS))
-    for z in ss.karte_zv:
-        folium.GeoJson(
-            {"type": "Feature", "geometry": z["geometry"], "properties": {}},
-            style_function=lambda _f: {"color": "#facc15", "weight": 3.5, "dashArray": "8 5",
-                                       "fill": False, "opacity": 1},
-            tooltip=f"Zemes vienība {z['kadastrs']}" + (f" · {z['platiba_ha']:.2f} ha" if z["platiba_ha"] else ""),
-            attr=VZD_ATRIBUCIJA,
-        ).add_to(m)
+    if ss.karte_zv:
+        zv_fc = {"type": "FeatureCollection", "features": [
+            {"type": "Feature", "geometry": z["geometry"], "properties": {
+                "kadastrs": z["kadastrs"],
+                "tooltip": f"Zemes vienība {z['kadastrs']}"
+                           + (f" · {z['platiba_ha']:.2f} ha" if z["platiba_ha"] else "")
+                           + " · klikšķis = iezīmēt visu ZV kā figūru"}}
+            for z in ss.karte_zv]}
+        m.add_child(_elements(_ZV_JS, dati=json.dumps(zv_fc, ensure_ascii=False)))
     if inv and nog_robezas:
         m.add_child(_elements(_NOGABALI_JS,
                               dati=json.dumps(_nogabalu_slanis(), ensure_ascii=False)))
@@ -611,7 +916,7 @@ def uzbuvet_karti() -> folium.Map:
     for f, o in zip(dati["features"], objekti):
         f["properties"]["etikete"] = _etikete(o)
     m.add_child(_elements(_OBJEKTI_JS, dati=json.dumps(dati, ensure_ascii=False),
-                          fg_el=fg,
+                          fg_el=fg, statusi=json.dumps(STATUSI, ensure_ascii=False),
                           pastavigi="true" if uzraksti else "false"))
     m.add_child(_elements(_LATVISKI_JS))
     plugins.Draw(
@@ -627,9 +932,8 @@ def uzbuvet_karti() -> folium.Map:
             "circle": False, "circlemarker": False, "marker": True,
         },
         # "edit": True (bool) Leaflet.draw 1.0.x nesaprot -> virsotnes netiek rādītas; jādod objekts
-        edit_options={"edit": {"selectedPathOptions": {"maintainColor": True, "dashArray": "6, 6",
-                                                       "fill": True, "fillOpacity": 0.15}},
-                      "remove": True, "poly": {"allowIntersection": False}},
+        # Virsotnes velk bez rīka (tuvinot ≥ 15) — labošanas poga nav vajadzīga
+        edit_options={"edit": False, "remove": True, "poly": {"allowIntersection": False}},
     ).add_to(m)
     plugins.MeasureControl(position="topleft", primary_length_unit="meters",
                            secondary_length_unit="kilometers", primary_area_unit="hectares",
@@ -669,6 +973,17 @@ def kartes_fragments() -> None:
     ss.karte_pedejie_zim = zim
     jauni, mainits = apvienot_ar_zimejumiem(ss.karte_objekti, zim)
     if mainits:
+        # Kartes izvēlnes darbības: "Sadalīt ar atdalošo joslu"
+        izpilditi = []
+        for o in jauni:
+            if o.pop("darbiba", None) == "sadalit":
+                dalas = sadalit_objektu(o, inv, nog_robezas, nt)
+                if len(dalas) == 1:
+                    st.toast(f"{o['nosaukums']} nepārsniedz max kailcirtes platību — nav ko dalīt", icon="ℹ️")
+                izpilditi += dalas
+            else:
+                izpilditi.append(o)
+        jauni = izpilditi
         ss.karte_objekti = jauni
         _mainits()
         st.rerun(scope="app")
@@ -682,8 +997,9 @@ if k2.button("🗑 Notīrīt visu", disabled=not objekti, use_container_width=Tr
     ss.karte_objekti, ss.karte_importeti = [], set()
     _mainits()
     st.rerun()
-k3.caption("Rīki kartes kreisajā pusē: ⬠ laukums · ╱ līnija · ▭ taisnstūris · 📍 punkts · "
-           "✎ labot · 🗑 dzēst · 📏 ātrais mērījums (netiek saglabāts).")
+k3.caption("**Klikšķis uz nogabala** — iezīmē to kā figūru · **velc virsotnes** (tuvinot līdz 16+) — robeža un "
+           "platība mainās · **labais taustiņš** uz figūras — statuss, sadalīt ar joslu, dzēst (tās pašas "
+           "darbības ir kreisajā rīkjoslā: 🏷 ✂️ 🔍 🗑; Delete dzēš izvēlēto). Zīmēšana: ⬠ ╱ ▭ 📍, 📏 mērījums.")
 
 kartes_fragments()
 objekti = ss.karte_objekti

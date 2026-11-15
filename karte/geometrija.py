@@ -269,18 +269,27 @@ def apvienot_ar_zimejumiem(objekti: list[dict], zimejumi: list[dict]) -> tuple[l
         if not g or g.get("type") not in ("Polygon", "LineString", "Point", "MultiPolygon"):
             continue
         g = {"type": g["type"], "coordinates": _apalot(g["coordinates"])}
-        oid = (z.get("properties") or {}).get("id")
+        props = z.get("properties") or {}
+        oid = props.get("id")
+        statuss = props.get("statuss") if props.get("statuss") in STATUSI else None
         if oid in pec_id and oid not in redzeti:
             o = dict(pec_id[oid])
             if _apalot(o["geometry"]["coordinates"]) != g["coordinates"]:
                 o["geometry"] = g
+                mainits = True
+            if statuss and statuss != o.get("statuss"):       # mainīts kartes izvēlnē
+                o["statuss"] = statuss
+                mainits = True
+            if props.get("darbiba"):                         # piem., "sadalit" — izpilda skats
+                o["darbiba"] = props["darbiba"]
                 mainits = True
             jauni.append(o)
             redzeti.add(oid)
         else:
             veids = {"Polygon": "Laukums", "MultiPolygon": "Laukums",
                      "LineString": "Līnija", "Point": "Punkts"}[g["type"]]
-            jauni.append(jauns_objekts(g, f"{veids} {nakamais}"))
+            nos = props.get("nosaukums") or f"{veids} {nakamais}"   # piem., no nogabala klikšķa
+            jauni.append(jauns_objekts(g, nos, statuss=statuss))
             nakamais += 1
             mainits = True
     if len(redzeti) != len(objekti):
