@@ -172,11 +172,12 @@ def auto_karte(kolonnas: list[Kolonna], parraksti: dict[str, str] | None = None)
 # Posmi (grupas / statusa kolonna)
 # --------------------------------------------------------------------------
 POSMI = ["jauns", "nesazvanams", "kvalificets", "priekszv", "tiksanas", "apsekosana",
-         "gala_pied", "nopirkts", "atteikts"]
+         "gala_pied", "nopirkts", "citi", "atteikts"]
 POSMU_NOSAUKUMI = {
     "jauns": "Jauns", "nesazvanams": "Nevar sazvanīt", "kvalificets": "Kvalificēts (izpētes zvans)",
     "priekszv": "Priekšvērtējums", "tiksanas": "Tikšanās sarunāta", "apsekosana": "Apsekošana",
-    "gala_pied": "Gala piedāvājums", "nopirkts": "Nopirkts", "atteikts": "Atteikts",
+    "gala_pied": "Gala piedāvājums", "nopirkts": "Nopirkts",
+    "citi": "Ārpus piltuves (follow up, LIZ, taksācija…)", "atteikts": "Atteikts",
 }
 _POSMU_SECIBA = {"jauns": 1, "kvalificets": 2, "priekszv": 3, "tiksanas": 4, "apsekosana": 5,
                  "gala_pied": 6, "nopirkts": 8}
@@ -187,10 +188,24 @@ _POSMU_ATSLEGVARDI = [
     ("gala_pied", ("gala piedav",)),
     ("apsekosana", ("apsek",)),
     ("tiksanas", ("tiksan",)),
-    ("priekszv", ("prieksvert", "priekšvert")),
+    ("priekszv", ("prieksvert", "priekšvert", "procesa")),
     ("kvalificets", ("izpetes zvan", "kvalific")),
+    ("citi", ("follow", "liz", "taksac", "debitor", "kampan")),
     ("jauns", ("jauns", "jaunie", "new")),
 ]
+
+# Kurā posmā ienākšana nosaka kuru datuma lauku (ja boardā nav attiecīgās datuma kolonnas).
+# Piltuves posmiem datums = pirmā ienākšana šajā VAI tālākā posmā (posmu var izlaist).
+POSMU_DATUMI = {
+    "kvalificets": ("kvalif_datums",),
+    "priekszv": ("priekszv_datums",),
+    "tiksanas": ("tiksanas_datums",),
+    "apsekosana": ("apsek_nosut_datums",),
+    "gala_pied": ("gala_pied_datums", "apsekots_datums"),   # gala piedāvājums seko apsekošanai
+    "nopirkts": ("nopirkts_datums",),
+    "atteikts": ("atteikts_datums",),
+}
+VESTURES_LAUKI = {k for v in POSMU_DATUMI.values() for k in v}
 
 
 def posms_no_teksta(teksts: str) -> str | None:
@@ -307,7 +322,31 @@ def normalizet_rindu(r: Rinda, karte: dict[str, str], grupu_karte: dict[str, str
     statuss = r.vertibas.get(karte.get("posms", ""), "") if "posms" in karte else ""
     if statuss and posms_no_teksta(statuss):
         posms = posms_no_teksta(statuss)
+    _datumi_no_vestures(r, lauki, karte, grupu_karte)
     return NRinda(r, lauki, posms, piez)
+
+
+def _datumi_no_vestures(r: Rinda, lauki: dict, karte: dict[str, str], grupu_karte: dict[str, str]) -> None:
+    """Aizpilda posmu datumus no grupu vēstures (tikai laukiem, kam boardā nav kolonnas)."""
+    if not r.grupu_vesture:
+        return
+    ienaksana: list[tuple[date, str]] = []
+    for laiks, grupa in r.grupu_vesture:
+        p = grupu_karte.get(grupa) or posms_no_teksta(grupa)
+        d = parse_datums(laiks)
+        if p and d:
+            ienaksana.append((d, p))
+    for posms, keys in POSMU_DATUMI.items():
+        if posms == "atteikts":
+            der = [d for d, p in ienaksana if p == "atteikts"]
+        else:
+            robeza = _POSMU_SECIBA[posms]
+            der = [d for d, p in ienaksana if _POSMU_SECIBA.get(p, 0) >= robeza]
+        if not der:
+            continue
+        for key in keys:
+            if key not in karte and lauki.get(key) is None:
+                lauki[key] = min(der)
 
 
 @dataclass
@@ -459,19 +498,25 @@ class Konfiguracija:
     grupas: dict[str, str] = field(default_factory=dict)     # grupas nosaukums -> posms
 
     @classmethod
-    def ielasit(cls, cels: str) -> "Konfiguracija":
-        try:
-            with open(cels, encoding="utf-8") as f:
-                d = json.load(f)
-        except (OSError, ValueError):
-            return cls()
+    def no_dict(cls, d: dict | None) -> "Konfiguracija":
+        d = d or {}
         return cls(boardi=[str(b) for b in d.get("boardi", [])],
                    kolonnas=dict(d.get("kolonnas", {})), grupas=dict(d.get("grupas", {})))
 
+    def uz_dict(self) -> dict:
+        return {"boardi": self.boardi, "kolonnas": self.kolonnas, "grupas": self.grupas}
+
+    @classmethod
+    def ielasit(cls, cels: str) -> "Konfiguracija":
+        try:
+            with open(cels, encoding="utf-8") as f:
+                return cls.no_dict(json.load(f))
+        except (OSError, ValueError):
+            return cls()
+
     def saglabat(self, cels: str) -> None:
         with open(cels, "w", encoding="utf-8") as f:
-            json.dump({"boardi": self.boardi, "kolonnas": self.kolonnas, "grupas": self.grupas},
-                      f, ensure_ascii=False, indent=2)
+            json.dump(self.uz_dict(), f, ensure_ascii=False, indent=2)
 
 
 @dataclass
@@ -482,6 +527,7 @@ class Dati:
     grupu_karte: dict[str, str]
     rindas: list[NRinda]
     leadi: list[Lead]
+    no_vestures: set[str] = field(default_factory=set)   # lauki, kas aizpildīti no grupu vēstures
 
 
 def sagatavot(boardi: list[Boards], konf: Konfiguracija | None = None) -> Dati:
@@ -493,7 +539,10 @@ def sagatavot(boardi: list[Boards], konf: Konfiguracija | None = None) -> Dati:
         karte = auto_karte(b.kolonnas, konf.kolonnas)
         kartes[b.id] = karte
         rindas.extend(normalizet_rindu(r, karte, grupu_karte) for r in b.rindas)
-    return Dati(boardi, kartes, grupu_karte, rindas, apvienot_leados(rindas))
+    no_vestures = set()
+    if any(r.grupu_vesture for b in boardi for r in b.rindas):
+        no_vestures = {k for k in VESTURES_LAUKI if any(k not in kartes[b.id] for b in boardi)}
+    return Dati(boardi, kartes, grupu_karte, rindas, apvienot_leados(rindas), no_vestures)
 
 
 def sodiena() -> date:

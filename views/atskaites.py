@@ -15,9 +15,31 @@ from atskaites.metrikas import (
 )
 from atskaites.modelis import LAUKI, LAUKI_PEC_KEY, POSMI, POSMU_NOSAUKUMI, Konfiguracija, sagatavot, sodiena
 from atskaites.monday import MondayKlients, MondayKluda
+from views.kopigi import glabatuve, lietotajs
 
 KONF_CELS = os.path.join(os.path.dirname(__file__), "..", "dati", "monday_konfiguracija.json")
+KONF_ATSLEGA = "monday_konfiguracija"
 ss = st.session_state
+
+
+def _ielasit_konf() -> Konfiguracija:
+    """Datubāze (izdzīvo Streamlit Cloud restartu); rezerve — lokālais JSON fails."""
+    g = glabatuve()
+    ier = g.iestatijums(KONF_ATSLEGA) if g else None
+    if ier:
+        return Konfiguracija.no_dict(ier["vertiba"])
+    return Konfiguracija.ielasit(KONF_CELS)
+
+
+def _saglabat_konf() -> None:
+    g = glabatuve()
+    if g:
+        try:
+            g.saglabat_iestatijumu(KONF_ATSLEGA, ss.konf.uz_dict(), lietotajs())
+            return
+        except Exception as e:  # noqa: BLE001
+            st.warning(f"Neizdevās saglabāt datubāzē ({e}) — saglabāts lokāli.")
+    ss.konf.saglabat(KONF_CELS)
 
 
 @st.cache_data(ttl=900, show_spinner="Ielādē boardus no monday.com…")
@@ -45,7 +67,7 @@ def _formatet(v, vien: str) -> str:
 
 
 if "konf" not in ss:
-    ss.konf = Konfiguracija.ielasit(KONF_CELS)
+    ss.konf = _ielasit_konf()
 
 st.title(":material/bar_chart: Leadu atskaites no monday.com")
 st.caption(
@@ -116,7 +138,7 @@ else:
         st.stop()
     if list(ids) != ss.konf.boardi:
         ss.konf.boardi = list(ids)
-        ss.konf.saglabat(KONF_CELS)
+        _saglabat_konf()
     try:
         boardi = _ieladet(token, ids)
     except MondayKluda as e:
@@ -144,6 +166,14 @@ st.sidebar.download_button(":material/download: Teksta kopsavilkums", teksts, fi
 st.subheader(f"Periods: {periods.nosaukums}")
 st.caption(f"{periods.no:%d.%m.%Y} – {periods.lidz:%d.%m.%Y} · {len(dati.boardi)} boardi · "
            f"{len(dati.rindas)} monday rindas → {len(dati.leadi)} leadi (visā laikā)")
+vestures_no = [b.vesture_no[:10] for b in dati.boardi if b.vesture_no]
+vestures_kludas = [f"{b.nosaukums}: {b.vestures_kluda}" for b in dati.boardi if b.vestures_kluda]
+if dati.no_vestures:
+    st.caption(f":material/history: Posmu datumi ņemti no monday grupu vēstures (pārvietošana starp grupām). "
+               f"Vēsture pieejama no {min(vestures_no)[8:10]}.{min(vestures_no)[5:7]}.{min(vestures_no)[:4]} — "
+               "par agrāk pārvietotiem leadiem posmu datumu nav.")
+if vestures_kludas:
+    st.warning("Grupu vēsturi neizdevās nolasīt — " + "; ".join(vestures_kludas), icon=":material/history:")
 
 tab_k, tab_a, tab_p, tab_l, tab_dk, tab_i = st.tabs(
     ["Kopsavilkums", "Pa agentiem", "Piltuve tagad", "Leadi", f"Datu kvalitāte ({len(atsk.datu_kvalitate)})",
@@ -220,7 +250,7 @@ with tab_i:
             pec_nos = {l.nosaukums: l.key for l in LAUKI}
             ss.konf.kolonnas = {pec_nos[r["Lauks"]]: r["Kolonna monday"].strip()
                                 for _, r in red.iterrows() if str(r["Kolonna monday"] or "").strip()}
-            ss.konf.saglabat(KONF_CELS)
+            _saglabat_konf()
             st.rerun()
 
     st.markdown("#### Grupu nozīme")
@@ -232,7 +262,7 @@ with tab_i:
         column_config={"Posms": st.column_config.SelectboxColumn(options=[POSMU_NOSAUKUMI[p] for p in POSMI])})
     if st.button("Saglabāt grupu nozīmi"):
         ss.konf.grupas = {r["Grupa"]: nos_uz_posmu[r["Posms"]] for _, r in gr.iterrows()}
-        ss.konf.saglabat(KONF_CELS)
+        _saglabat_konf()
         st.rerun()
 
     st.markdown("#### Board standarts")

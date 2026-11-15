@@ -154,6 +154,7 @@ def test_klients_lapo_un_parse_rindas():
                                           {"id": "c2", "title": "Sazvanāms", "type": "checkbox"}],
                               "items_page": {"cursor": "abc", "items": [item(1, "2026-10-01")]}}]}},
         {"data": {"next_items_page": {"cursor": None, "items": [item(2, "2026-10-02")]}}},
+        {"data": {"boards": [{"activity_logs": []}]}},
     ]
     vaicajumi = []
 
@@ -171,3 +172,67 @@ def test_klients_kluda():
     k = MondayKlients("", transport=lambda p: {"errors": [{"message": "Board not found"}]})
     with pytest.raises(MondayKluda, match="Board not found"):
         k.ieladet_boardu("1")
+
+
+def test_konfiguracija_dict_un_glabatuve(tmp_path):
+    from atskaites.modelis import Konfiguracija
+    from glabatuve import Glabatuve
+
+    k = Konfiguracija(boardi=["1", "2"], kolonnas={"telefons": "Tālr."}, grupas={"Jaunie": "jauns"})
+    assert Konfiguracija.no_dict(k.uz_dict()) == k
+    assert Konfiguracija.no_dict(None) == Konfiguracija()
+
+    g = Glabatuve(sqlite_cels=str(tmp_path / "t.db"))
+    g.izveidot()
+    g.saglabat_iestatijumu("monday_konfiguracija", k.uz_dict(), "tests")
+    assert Konfiguracija.no_dict(g.iestatijums("monday_konfiguracija")["vertiba"]) == k
+
+
+def _ts(iso: str) -> str:
+    from datetime import datetime
+    return str(int(datetime.fromisoformat(iso).timestamp() * 10_000_000))
+
+
+def test_grupu_vesture_no_activity_log():
+    from atskaites.monday import grupu_vesture_no_zurnala
+    z = [  # jaunākie pirmie, kā monday atgriež
+        {"event": "update_column_value", "created_at": _ts("2026-11-10T09:00:00+00:00"),
+         "data": json.dumps({"pulse_id": 1, "group_id": "g2"})},
+        {"event": "move_pulse_into_group", "created_at": _ts("2026-11-05T09:00:00+00:00"),
+         "data": json.dumps({"pulse_id": 1, "source_group": {"id": "g1", "title": "Jauns"},
+                             "dest_group": {"id": "g2", "title": "Izpētes zvans"}})},
+        {"event": "create_pulse", "created_at": _ts("2026-11-02T09:00:00+00:00"),
+         "data": json.dumps({"pulse_id": 1, "group_id": "g1", "group_name": "Jauns"})},
+    ]
+    v = grupu_vesture_no_zurnala(z, {"g1": "Jauns", "g2": "Izpētes zvans"})
+    assert [(t[:10], g) for t, g in v["1"]] == [("2026-11-02", "Jauns"), ("2026-11-05", "Izpētes zvans")]
+
+
+def test_posmu_datumi_no_grupu_vestures_dod_metrikus():
+    kol = [Kolonna("c1", "Lead Datums", "date"), Kolonna("c3", "KAD.NR", "text")]
+    b = Boards("1", "Agents_A", kol, [], grupas=["Jauns", "Izpētes zvans", "Priekšvērtējums", "Nopirkts"])
+    # A: Jauns → Izpētes zvans → Priekšvērtējums; B: Jauns → uzreiz Nopirkts (izlaiž posmus)
+    a = Rinda("1", "Agents_A", "1", "LEAD - 1", "Priekšvērtējums", None,
+              {"Lead Datums": "2026-11-02", "KAD.NR": "11111111111"},
+              [("2026-11-02T10:00:00+02:00", "Jauns"), ("2026-11-04T10:00:00+02:00", "Izpētes zvans"),
+               ("2026-11-09T10:00:00+02:00", "Priekšvērtējums")])
+    bb = Rinda("1", "Agents_A", "2", "LEAD - 2", "Nopirkts", None,
+               {"Lead Datums": "2026-10-20", "KAD.NR": "22222222222"},
+               [("2026-10-20T10:00:00+02:00", "Jauns"), ("2026-11-12T10:00:00+02:00", "Nopirkts")])
+    b.rindas = [a, bb]
+    d = sagatavot([b])
+    atsk = aprekinat(d, menesis(2026, 11), date(2026, 11, 15))
+    assert atsk.metriks("Kvalificēti objekti") == 2          # B kvalificēts ar to pašu nopirkšanu
+    assert atsk.metriks("Vid. laiks lead → kvalifikācija") == pytest.approx((2 + 23) / 2)
+    assert atsk.metriks("Priekšvērtējumi") == 2
+    assert atsk.metriks("Nopirkti objekti") == 1
+    assert "Izpētes zvans (datums)" not in atsk.trukstosas_kolonnas["Agents_A"]
+
+
+def test_grupa_procesa_un_follow_up():
+    from atskaites.modelis import posms_no_teksta
+    assert posms_no_teksta("Procesā") == "priekszv"
+    assert posms_no_teksta("Follow up") == "citi"
+    assert posms_no_teksta("LIZ debitori") == "citi"
+    assert posms_no_teksta("Facebook PDF kampaņa - follow up") == "citi"
+    assert posms_no_teksta("Manas tikšanās") == "tiksanas"
