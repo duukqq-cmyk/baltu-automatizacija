@@ -1,7 +1,8 @@
 """Atskaišu panelis BI stilā: KPI kartītes (HTML), piltuve, posmu laiki, tendence (Altair).
 
 Tīras funkcijas bez Streamlit — view tikai izsauc un parāda rezultātu.
-Krāsas: viens akcenta zils sērijām, statusa zaļš/sarkans tikai izmaiņu bultām (ar ▲▼ un tekstu).
+Krāsas — tikai aplikācijas paletes (views/ikonas.py, cenradis.py): Atskaišu sadaļas rozā datiem,
+zaļš/sarkans tikai izmaiņu bultām (ar ▲▼), pelēkais palīgtekstam un otrai sērijai.
 """
 from __future__ import annotations
 
@@ -14,29 +15,28 @@ import pandas as pd
 
 from atskaites.metrikas import Atskaite
 
-ZILS = "#2a78d6"
-ORANZS = "#eb6834"
-AKVA = "#1baf7a"
-LABS = "#2f9e5b"
-SLIKTS = "#e04f4f"
+# Aplikācijas paletes krāsas (sk. views/ikonas.py SADALAS["atskaites"] un views/cenradis.py)
+AKCENTS = "#DB2777"   # Atskaišu sadaļas krāsa — visi datu stabiņi, līnijas, akcenti
+LABS = "#16A34A"      # pozitīva izmaiņa (kā Cenrādī)
+SLIKTS = "#DC2626"    # negatīva izmaiņa (kā Cenrādī)
+PELEKS = "#6b7280"    # palīgteksts, etiķetes, otrā sērija
 
 CSS = """
 <style>
-.bk-sec{font-size:.78rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;opacity:.65;margin:.2rem 0 .5rem}
+.bk-sec{font-size:.78rem;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#6b7280;margin:.2rem 0 .5rem}
 .bk-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;margin-bottom:10px}
 .bk-grid.g4{grid-template-columns:repeat(4,minmax(0,1fr))}
 @media (max-width:1100px){.bk-grid,.bk-grid.g4{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media (max-width:640px){.bk-grid,.bk-grid.g4{grid-template-columns:repeat(2,minmax(0,1fr))}}
-.bk-kpi{border:1px solid rgba(128,128,128,.28);border-radius:8px;padding:12px 14px 10px;background:rgba(128,128,128,.05);
+.bk-kpi{border:1px solid rgba(128,128,128,.3);border-radius:.5rem;padding:12px 14px 10px;
         display:flex;flex-direction:column;gap:2px;min-height:118px;position:relative}
-.bk-kpi.galvenais{border-top:3px solid #2a78d6}
-.bk-l{font-size:.8rem;opacity:.7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bk-l{font-size:.8rem;color:#6b7280;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bk-v{font-size:1.85rem;font-weight:600;line-height:1.15}
 .bk-v small{font-size:.85rem;font-weight:500;opacity:.65;margin-left:3px}
 .bk-v.nav{font-size:1.05rem;font-weight:500;opacity:.45;padding:.45rem 0 .3rem}
 .bk-d{font-size:.78rem;opacity:.9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .bk-d .s{opacity:.6}
-.bk-d.labs b{color:#2f9e5b}.bk-d.slikts b{color:#e04f4f}.bk-d.neitr b{opacity:.75}
+.bk-d.labs b{color:#16A34A}.bk-d.slikts b{color:#DC2626}.bk-d.neitr b{opacity:.75}
 .bk-spark{margin-top:auto;padding-top:6px}
 .bk-chip{display:inline-block;border:1px solid rgba(128,128,128,.3);border-radius:999px;padding:2px 10px;
          font-size:.75rem;margin:0 6px 6px 0;opacity:.8}
@@ -70,9 +70,9 @@ def _sparkline(vertibas: list[float], plat: int = 140, augst: int = 28) -> str:
     x, y = pts[-1]
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{plat}" height="{augst}" '
            f'viewBox="0 0 {plat} {augst}">'
-           f'<polyline points="{linija}" fill="none" stroke="#9a9a96" stroke-width="1.5" '
+           f'<polyline points="{linija}" fill="none" stroke="#6b7280" stroke-width="1.5" '
            f'stroke-linejoin="round" stroke-linecap="round"/>'
-           f'<circle cx="{x}" cy="{y}" r="3" fill="{ZILS}"/></svg>')
+           f'<circle cx="{x}" cy="{y}" r="3" fill="{AKCENTS}"/></svg>')
     b64 = base64.b64encode(svg.encode()).decode()
     return f'<img alt="12 nedēļu tendence" src="data:image/svg+xml;base64,{b64}" style="width:100%;height:{augst}px">'
 
@@ -181,11 +181,11 @@ def laiku_df(a: Atskaite) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # Grafiki
 # --------------------------------------------------------------------------
-ETIKETE = "#7d7c78"  # ~4.3:1 kontrasts gan uz balta, gan uz tumša Streamlit fona
+ETIKETE = PELEKS
 
 
 def _hbar(df: pd.DataFrame, y: str, x: str, etikete: str, tooltip: list, augstums_rindai: int = 34,
-          krasa: str = ZILS) -> alt.Chart:
+          krasa: str = AKCENTS) -> alt.Chart:
     secība = list(df[y])
     pamats = alt.Chart(df).encode(
         y=alt.Y(f"{y}:N", sort=secība, title=None, axis=alt.Axis(labelLimit=220, ticks=False, domain=False)),
@@ -217,16 +217,21 @@ def iemeslu_grafiks(iemesli: list[tuple[str, int]]) -> alt.Chart:
 
 
 def tendences_grafiks(tend: list[dict], serijas=("Leadi", "Kvalificēti", "Priekšvērtējumi")) -> alt.Chart:
+    """Viena sadaļas krāsa: 1. sērija pilna līnija, 2. raustīta, 3. pelēka — bez svešiem toņiem."""
     df = pd.DataFrame(tend)
     df["Nedēļa no"] = pd.to_datetime(df["Nedēļa"])
     gars = df.melt(id_vars=["Nedēļa no"], value_vars=list(serijas), var_name="Rādītājs", value_name="Skaits")
-    krasas = alt.Scale(domain=list(serijas), range=[ZILS, ORANZS, AKVA][:len(serijas)])
+    dom = list(serijas)
+    krasas = alt.Scale(domain=dom, range=[AKCENTS, AKCENTS, PELEKS][:len(dom)])
+    svitras = alt.Scale(domain=dom, range=[[1, 0], [5, 4], [1, 0]][:len(dom)])
     pamats = alt.Chart(gars).encode(
         x=alt.X("Nedēļa no:T", title=None, axis=alt.Axis(format="%d.%m", tickCount="week", grid=False)),
         y=alt.Y("Skaits:Q", title=None, axis=alt.Axis(tickMinStep=1, gridOpacity=.35, domain=False)),
-        color=alt.Color("Rādītājs:N", scale=krasas, legend=alt.Legend(orient="top", title=None)),
+        color=alt.Color("Rādītājs:N", scale=krasas, legend=alt.Legend(orient="top", title=None, symbolType="stroke",
+                                                                      symbolStrokeWidth=2)),
+        strokeDash=alt.StrokeDash("Rādītājs:N", scale=svitras, legend=None),
     )
     linija = pamats.mark_line(strokeWidth=2)
-    punkti = pamats.mark_circle(size=40).encode(
+    punkti = pamats.mark_circle(size=36).encode(
         tooltip=[alt.Tooltip("Nedēļa no:T", format="%d.%m.%Y"), "Rādītājs:N", "Skaits:Q"])
     return (linija + punkti).properties(height=230)
