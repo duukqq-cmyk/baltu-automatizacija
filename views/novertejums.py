@@ -1,4 +1,4 @@
-"""UI: 🧮 Cirsmas novērtējums — summu kalkulators cirsmas novērtējuma PDF.
+"""UI: Cirsmas novērtējums — summu kalkulators cirsmas novērtējuma PDF.
 
 Nav atsevišķa lapa — to izsauc views/mezs.py kā trešo datu avota režīmu.
 """
@@ -38,7 +38,7 @@ def _iestatijumi() -> list[str]:
         ss.setdefault(f"nov_radit_{k}", RADITAJI[k]["default"])
     ss.setdefault("nov_radit_sugas", False)
 
-    with st.popover("⚙️", help="Kuras summas rādīt"):
+    with st.popover(":material/tune:", help="Kuras summas rādīt"):
         st.markdown("**Rādāmās summas**")
         for k in _SEC:
             r = RADITAJI[k]
@@ -64,7 +64,7 @@ def render() -> None:
         st.caption(
             "Ievelc vienu vai vairākus **cirsmas novērtējuma** PDF — Mežvērtes (viens nogabals) vai "
             "pārdodamo cirsmu (daudz cirsmu vienā PDF). Sistēma saskaita nogabalus un platības; "
-            "ar ⚙️ vari ieslēgt arī vērtības, krājas, sortimentus u.c."
+            "ar :material/tune: vari ieslēgt arī vērtības, krājas, sortimentus u.c."
         )
     with zobrats:
         raditaji = _iestatijumi()
@@ -72,7 +72,7 @@ def render() -> None:
     faili = st.file_uploader("Cirsmas novērtējuma PDF", type=["pdf"],
                              accept_multiple_files=True, key="nov_faili")
     if not faili:
-        st.info("⬆️ Ievelc šeit cirsmas novērtējuma PDF failus (var vairākus uzreiz).")
+        st.info(":material/upload: Ievelc šeit cirsmas novērtējuma PDF failus (var vairākus uzreiz).")
         return
 
     novertejumi: list[Novertejums] = []
@@ -172,7 +172,7 @@ def render() -> None:
             st.caption("Sugu dati netika nolasīti.")
 
     csv = df.to_csv(index=False, sep=";", decimal=",").encode("utf-8-sig")
-    st.download_button("⬇️ Lejupielādēt CSV", csv,
+    st.download_button(":material/download: Lejupielādēt CSV", csv,
                        file_name="cirsmas_novertejums_kopsavilkums.csv", mime="text/csv")
 
 
@@ -180,7 +180,7 @@ def _vertibas_sadala(novertejumi: list[Novertejums]) -> None:
     """Precīza cirsmas vērtība: uzmērītie kubi pa sortimentiem × cenrāža cenas − izdevumi."""
     c = aktivais_cenradis()
     vertibas = [vertet(n, c) for n in novertejumi]
-    st.subheader("💶 Cirsmas vērtība pēc sortimentiem")
+    st.subheader(":material/euro: Cirsmas vērtība pēc sortimentiem")
     st.caption("Kubi no novērtējuma (precīzi uzmērīti) → sortimenti pēc Cenrāža kartējuma "
                "(piem., skujkokiem Resnā = zāģbaļķi, Vidējā = sīkbaļķi, Tievā = tara, P. malka = "
                "papīrmalka) × cenas − izdevumi − peļņas rezerve. Cenas, izdevumus un kartējumu maini "

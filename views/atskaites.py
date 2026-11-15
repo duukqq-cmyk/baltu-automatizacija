@@ -47,7 +47,7 @@ def _formatet(v, vien: str) -> str:
 if "konf" not in ss:
     ss.konf = Konfiguracija.ielasit(KONF_CELS)
 
-st.title("📊 Leadu atskaites no monday.com")
+st.title(":material/bar_chart: Leadu atskaites no monday.com")
 st.caption(
     "Savāc datus no iepirkumu agentu boardiem, apvieno rindas leados (1 īpašuma kadastra Nr. = 1 lead) "
     "un aprēķina CEO metrikus: leadi, kvalifikācija, priekšvērtējums, apsekošana, pirkumi, atteikumi."
@@ -60,7 +60,7 @@ token = ""
 if avots == "monday.com API":
     token = _token_no_vides()
     if token:
-        st.sidebar.success("API tokens nolasīts no iestatījumiem", icon="🔑")
+        st.sidebar.success("API tokens nolasīts no iestatījumiem", icon=":material/key:")
     else:
         token = st.sidebar.text_input(
             "monday API tokens", type="password",
@@ -92,7 +92,7 @@ else:
 klients = None
 if avots == "Demo dati":
     st.info("Rāda **izdomātus demo datus** (3 agentu boardi). Reāliem datiem sānjoslā izvēlies monday.com API.",
-            icon="🧪")
+            icon=":material/science:")
     boardi = demo_boardi(sod)
 else:
     if not token:
@@ -100,7 +100,7 @@ else:
         st.stop()
     klients = MondayKlients(token)
     c1, c2 = st.columns([4, 1])
-    if c2.button("↻ Boardu saraksts", use_container_width=True) or "boardu_saraksts" not in ss:
+    if c2.button(":material/refresh: Boardu saraksts", use_container_width=True) or "boardu_saraksts" not in ss:
         try:
             ss.boardu_saraksts = klients.boardu_saraksts()
         except MondayKluda as e:
@@ -122,7 +122,7 @@ else:
     except MondayKluda as e:
         st.error(str(e))
         st.stop()
-    if st.button("↻ Ielādēt datus no jauna"):
+    if st.button(":material/refresh: Ielādēt datus no jauna"):
         _ieladet.clear()
         st.rerun()
 
@@ -135,10 +135,10 @@ excel_atskaite(xlsx, atsk, dati)
 teksts = teksta_kopsavilkums(atsk)
 st.sidebar.header("Lejupielāde")
 with open(xlsx, "rb") as f:
-    st.sidebar.download_button("⬇️ Excel atskaite", f, file_name=f"leadu_atskaite_{periods.no:%Y-%m}.xlsx",
+    st.sidebar.download_button(":material/download: Excel atskaite", f, file_name=f"leadu_atskaite_{periods.no:%Y-%m}.xlsx",
                                use_container_width=True,
                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.sidebar.download_button("⬇️ Teksta kopsavilkums", teksts, file_name="leadu_atskaite.txt",
+st.sidebar.download_button(":material/download: Teksta kopsavilkums", teksts, file_name="leadu_atskaite.txt",
                            use_container_width=True)
 
 st.subheader(f"Periods: {periods.nosaukums}")
@@ -240,7 +240,7 @@ with tab_i:
     for b in dati.boardi:
         karte = dati.kartes.get(b.id, {})
         trukst = [l for l in LAUKI if l.key not in karte and l.key not in ("posms", "kontaktpersona")]
-        with st.expander(f"{b.nosaukums} — trūkst {len(trukst)} kolonnas" if trukst else f"{b.nosaukums} — ✅ viss ir"):
+        with st.expander(f"{b.nosaukums} — trūkst {len(trukst)} kolonnas" if trukst else f"{b.nosaukums} — :green[:material/check_circle:] viss ir"):
             if not trukst:
                 continue
             st.dataframe(pd.DataFrame([{"Kolonna": l.nosaukums, "Tips": l.monday_tips, "Kam vajag": l.apraksts}

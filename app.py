@@ -10,28 +10,31 @@ Sākuma logā izvēlies moduli:
 """
 import streamlit as st
 
+from views.ikonas import SADALAS, css, nav
+
 st.set_page_config(
     page_title="Automatizācijas platforma",
-    page_icon="⚙️",
+    page_icon=":material/forest:",
     layout="wide",
 )
 
-# Pārzīmējot lapu (pēc katras darbības), Streamlit uz mirkli padara elementus blāvus — tas izskatās
-# kā raustīšanās. Rezultāti atjaunojas sekundes daļā, tāpēc blāvošanu izslēdzam visai lietotnei.
-st.sidebar.markdown("""<style>
+NOSAUKUMI = {"sakums": "Sākums", "mezs": "Meža inventarizācija", "saglabatie": "Saglabātie",
+             "cenradis": "Cenrādis", "ligumi": "Līgumu datu izvilkšana", "atskaites": "Atskaites",
+             "karte": "Karte (beta)"}
+lapas = {atsl: st.Page(SADALAS[atsl][2], title=NOSAUKUMI[atsl], icon=nav(atsl), default=atsl == "sakums")
+         for atsl in NOSAUKUMI}
+pg = st.navigation(list(lapas.values()))
+aktiva = next((a for a, l in lapas.items() if l.url_path == pg.url_path), None)
+
+# Stils visai lietotnei:
+#  * ikonu krāsas (navigācija, aktīvās lapas virsraksts) — views/ikonas.py;
+#  * pārzīmējot lapu (pēc katras darbības), Streamlit uz mirkli padara elementus blāvus — tas
+#    izskatās kā raustīšanās; rezultāti atjaunojas sekundes daļā, tāpēc blāvošanu izslēdzam.
+st.sidebar.markdown("<style>\n" + css(aktiva) + """
 [data-stale="true"], .stale-element {opacity: 1 !important; transition: none !important; filter: none !important;}
 </style>""", unsafe_allow_html=True)
 
-pg = st.navigation([
-    st.Page("views/sakums.py", title="Sākums", icon="🏠", default=True),
-    st.Page("views/mezs.py", title="Meža inventarizācija", icon="🌲"),
-    st.Page("views/saglabatie.py", title="Saglabātie", icon="📁"),
-    st.Page("views/cenradis.py", title="Cenrādis", icon="💶"),
-    st.Page("views/ligumi.py", title="Līgumu datu izvilkšana", icon="📄"),
-    st.Page("views/atskaites.py", title="Atskaites", icon="📊"),
-    st.Page("views/karte.py", title="Karte (beta)", icon="🗺️"),
-])
 # Lietotāja vārds izmaiņu vēsturei un saglabātajiem priekšvērtējumiem (līdz būs pieteikšanās)
-st.sidebar.text_input("👤 Tavs vārds", key="lietotaja_vards",
+st.sidebar.text_input(":material/person: Tavs vārds", key="lietotaja_vards",
                       help="Tiek ierakstīts cenrāža izmaiņu vēsturē un saglabātajos priekšvērtējumos.")
 pg.run()

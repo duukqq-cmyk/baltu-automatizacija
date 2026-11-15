@@ -11,7 +11,7 @@ from cirsma.ligumi import (
     ekstrakcija_regex, ekstrakcija_ai, epasta_kopsavilkums, excel_ligumi,
 )
 
-st.title("📄 Līgumu datu izvilkšana no PDF")
+st.title(":material/description: Līgumu datu izvilkšana no PDF")
 st.caption(
     "Augšupielādē vienu vai vairākus PDF līgumus — sistēma izvelk puses, summas, "
     "datumus, termiņus un īpašos nosacījumus. Lauki, par kuriem sistēma nav droša, "
@@ -30,7 +30,7 @@ faili = st.file_uploader(
     help="Paraugi: dati/ligumi/paraugs_pirkuma_ligums.pdf un paraugs_nomas_ligums.pdf",
 )
 if not faili:
-    st.info("⬆️ Augšupielādē vienu vai vairākus PDF līgumus (paraugi mapē `dati/ligumi/`).")
+    st.info(":material/upload: Augšupielādē vienu vai vairākus PDF līgumus (paraugi mapē `dati/ligumi/`).")
     st.stop()
 
 rezultati = []
@@ -82,8 +82,8 @@ st.code(kopsavilkums, language=None)
 xlsx_cels = tempfile.mktemp(suffix=".xlsx")
 excel_ligumi(xlsx_cels, rezultati)
 with open(xlsx_cels, "rb") as f:
-    st.download_button("⬇️ Lejupielādēt Excel tabulu", f,
+    st.download_button(":material/download: Lejupielādēt Excel tabulu", f,
                        file_name="ligumu_dati.xlsx",
                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-st.download_button("⬇️ Lejupielādēt kopsavilkumu (teksts)", kopsavilkums,
+st.download_button(":material/download: Lejupielādēt kopsavilkumu (teksts)", kopsavilkums,
                    file_name="ligumu_kopsavilkums.txt")

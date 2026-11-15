@@ -57,7 +57,7 @@ def cenradis_statuss_sanjosla() -> None:
     aktivais_cenradis()
     meta = st.session_state.get("cenradis_meta")
     with st.sidebar:
-        st.markdown("**💶 Cenrādis**")
+        st.markdown(":material/euro: **Cenrādis**")
         if cenradis_mainits():
             st.caption("✎ Šajā sesijā mainīts (nav saglabāts kā noklusējums)")
         elif meta:
@@ -65,7 +65,7 @@ def cenradis_statuss_sanjosla() -> None:
                        + (f" · {meta['autors']}" if meta.get("autors") else ""))
         else:
             st.caption("Rūpnīcas noklusējums (vēl nav saglabāts)")
-        st.page_link("views/cenradis.py", label="Mainīt cenas, sortimentus, izdevumus", icon="⚙️")
+        st.page_link("views/cenradis.py", label="Mainīt cenas, sortimentus, izdevumus", icon=":material/tune:")
 
 
 def lietotajs() -> str | None:
