@@ -148,3 +148,24 @@ def test_baltalksnis(vecums, caurmers, cert):
     n = _nog(formula="10Ba" + str(vecums), vecums=vecums, vid_caurmers=caurmers, vid_augstums=14,
              skerslaukums=None)
     assert novertet_nogabalu(n).kailcirte_pec_kriterijiem is cert
+
+
+def test_cenraza_varianti():
+    from cirsma.cenradis import Cenradis, CenrazaVarianti
+    v = CenrazaVarianti.no_cenradis(Cenradis())
+    assert v.kompozicija().uz_json() == Cenradis().uz_json()
+    v.izveidot("kailcirte", "Ziema")
+    v.sadalas["kailcirte"]["varianti"]["Ziema"]["matrica"]["P"]["Zāģbaļķi"] = [130, 0.7]
+    assert v.kompozicija().cena("P", "Zāģbaļķi") == 100                      # noklusējums — Pamata
+    assert v.kompozicija({"kailcirte": "Ziema"}).cena("P", "Zāģbaļķi") == 130
+    v.iestatit_noklusejumu("kailcirte", "Ziema")
+    assert v.kompozicija().cena("P", "Zāģbaļķi") == 130
+    assert CenrazaVarianti.no_json(v.uz_json()).uz_json() == v.uz_json()
+    with pytest.raises(ValueError):
+        v.dzest("kailcirte", "Ziema")                                        # noklusējumu nevar dzēst
+    with pytest.raises(ValueError):
+        v.izveidot("kailcirte", "Ziema")                                     # dublikāts
+    v.parsaukt("kailcirte", "Ziema", "Ziema 2026")
+    assert v.noklusejums("kailcirte") == "Ziema 2026"
+    v.dzest("kailcirte", "Pamata")
+    assert v.nosaukumi("kailcirte") == ["Ziema 2026"]

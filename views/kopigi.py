@@ -5,7 +5,12 @@ import copy
 
 import streamlit as st
 
-from cirsma.cenradis import ATSLEGA, Cenradis
+from cirsma.cenradis import (
+    ATSLEGA, ATSLEGA_VARIANTI, SADALAS, Cenradis, CenrazaVarianti,
+)
+from cirsma.cenradis import (
+    SADALU_NOSAUKUMI as CENRAZA_SADALAS,
+)
 
 
 @st.cache_resource(show_spinner=False)
@@ -25,46 +30,105 @@ def glabatuve():
         return None
 
 
-def ielade_saglabato_cenradi() -> tuple[Cenradis, dict | None]:
-    """(cenrādis no datubāzes vai noklusējums, metadati {mainits, autors})."""
+def ielade_saglabatos_variantus() -> tuple[CenrazaVarianti, dict | None]:
+    """(varianti no datubāzes vai noklusējums, metadati {mainits, autors}).
+
+    Ja ir tikai vecais vienotais cenrādis (ATSLEGA), tas kļūst par variantu "Pamata" visās sadaļās.
+    """
     g = glabatuve()
-    ier = g.iestatijums(ATSLEGA) if g else None
+    ier = g.iestatijums(ATSLEGA_VARIANTI) if g else None
     if ier:
-        return Cenradis.no_json(ier["vertiba"]), {"mainits": ier["mainits"], "autors": ier["autors"]}
-    return Cenradis(), None
+        return CenrazaVarianti.no_json(ier["vertiba"]), {"mainits": ier["mainits"], "autors": ier["autors"]}
+    vecais = g.iestatijums(ATSLEGA) if g else None
+    if vecais:
+        return (CenrazaVarianti.no_cenradis(Cenradis.no_json(vecais["vertiba"])),
+                {"mainits": vecais["mainits"], "autors": vecais["autors"]})
+    return CenrazaVarianti.no_cenradis(Cenradis()), None
+
+
+def _sakt_sesiju() -> None:
+    ss = st.session_state
+    if "cenradis_varianti_saglabatie" not in ss:
+        v, meta = ielade_saglabatos_variantus()
+        ss.cenradis_varianti = copy.deepcopy(v)
+        ss.cenradis_varianti_saglabatie = copy.deepcopy(v)
+        ss.cenradis_meta = meta
+        ss.cenradis_izvele = v.noklusejuma_izvele()
+        ss.setdefault("cenradis_versija", 0)
+
+
+def varianti() -> CenrazaVarianti:
+    """Sesijas (rediģējamie) cenrāža varianti."""
+    _sakt_sesiju()
+    return st.session_state.cenradis_varianti
+
+
+def izvele() -> dict[str, str]:
+    """Kurš variants katrai sadaļai izvēlēts šajā sesijā (pēc noklusējuma — noklusējuma varianti)."""
+    _sakt_sesiju()
+    ss = st.session_state
+    v = ss.cenradis_varianti
+    for s in SADALAS:
+        if ss.cenradis_izvele.get(s) not in v.sadalas[s]["varianti"]:
+            ss.cenradis_izvele[s] = v.noklusejums(s)
+    return ss.cenradis_izvele
 
 
 def aktivais_cenradis() -> Cenradis:
-    """Sesijas cenrādis (pirmajā reizē ielādē saglabāto). Izmaiņas lapā Cenrādis
-    darbojas uzreiz šajā sesijā; "Saglabāt" padara tās par noklusējumu visiem."""
-    if "cenradis_saglabatais" not in st.session_state:
-        c, meta = ielade_saglabato_cenradi()
-        st.session_state.setdefault("cenradis", c)
-        st.session_state.cenradis_saglabatais = copy.deepcopy(c)
-        st.session_state.cenradis_meta = meta
-        st.session_state.setdefault("cenradis_versija", 0)
-    return st.session_state.cenradis
+    """Cenrādis aprēķiniem: katrai sadaļai — šajā sesijā izvēlētais variants.
+
+    Ja atvērts saglabāts darbs ar savām cenām, tiek lietotas tās (līdz lietotājs atgriežas pie variantiem).
+    """
+    _sakt_sesiju()
+    ss = st.session_state
+    if ss.get("cenradis_ieladets") is not None:
+        return ss.cenradis_ieladets
+    return ss.cenradis_varianti.kompozicija(izvele())
 
 
 def cenradis_mainits() -> bool:
-    """Vai sesijas cenrādis atšķiras no saglabātā noklusējuma."""
-    aktivais_cenradis()
-    return st.session_state.cenradis.uz_json() != st.session_state.cenradis_saglabatais.uz_json()
+    """Vai sesijas varianti atšķiras no saglabātajiem."""
+    _sakt_sesiju()
+    ss = st.session_state
+    return ss.cenradis_varianti.uz_json() != ss.cenradis_varianti_saglabatie.uz_json()
+
+
+def _mainit_izveli(sadala: str, atsl: str) -> None:
+    st.session_state.cenradis_izvele[sadala] = st.session_state[atsl]
 
 
 def cenradis_statuss_sanjosla() -> None:
-    """Īss cenrāža statuss sānjoslā ar saiti uz lapu Cenrādis."""
-    aktivais_cenradis()
-    meta = st.session_state.get("cenradis_meta")
+    """Cenrāža statuss sānjoslā + ātra varianta izvēle sadaļām, kurām ir vairāki varianti."""
+    _sakt_sesiju()
+    ss = st.session_state
+    v, izv = varianti(), izvele()
+    meta = ss.get("cenradis_meta")
     with st.sidebar:
         st.markdown(":material/euro: **Cenrādis**")
-        if cenradis_mainits():
-            st.caption("✎ Šajā sesijā mainīts (nav saglabāts kā noklusējums)")
-        elif meta:
-            st.caption(f"Saglabātais noklusējums · {meta['mainits'][:10]}"
-                       + (f" · {meta['autors']}" if meta.get("autors") else ""))
+        if ss.get("cenradis_ieladets") is not None:
+            st.caption(":material/history: Lietotas saglabātā darba cenas")
+            if st.button("Atgriezties pie variantiem", key="sb_cen_atgriezties", use_container_width=True):
+                ss.cenradis_ieladets = None
+                st.rerun()
         else:
-            st.caption("Rūpnīcas noklusējums (vēl nav saglabāts)")
+            for s in SADALAS:
+                if len(v.nosaukumi(s)) < 2:
+                    continue
+                atsl = f"sb_izv_{s}"
+                ss[atsl] = izv[s]
+                st.selectbox(CENRAZA_SADALAS[s], v.nosaukumi(s), key=atsl,
+                             format_func=lambda n, s=s: n + (" ★" if n == v.noklusejums(s) else ""),
+                             on_change=_mainit_izveli, args=(s, atsl))
+            atskiras = [CENRAZA_SADALAS[s] for s in SADALAS if izv[s] != v.noklusejums(s)]
+            if cenradis_mainits():
+                st.caption("✎ Ir nesaglabātas izmaiņas lapā Cenrādis")
+            elif atskiras:
+                st.caption("Šajā sesijā ne-noklusējuma varianti: " + ", ".join(atskiras))
+            elif meta:
+                st.caption(f"Noklusējuma varianti · saglabāts {meta['mainits'][:10]}"
+                           + (f" · {meta['autors']}" if meta.get("autors") else ""))
+            else:
+                st.caption("Rūpnīcas noklusējums (vēl nav saglabāts)")
         st.page_link("views/cenradis.py", label="Mainīt cenas, sortimentus, izdevumus", icon=":material/tune:")
 
 
