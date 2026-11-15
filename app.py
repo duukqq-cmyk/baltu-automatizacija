@@ -10,6 +10,7 @@ Sākuma logā izvēlies moduli:
 """
 import streamlit as st
 
+from views.autentifikacija import lietotaja_josla, pieteiksanas_ieslegta, prasit_pieteiksanos
 from views.ikonas import SADALAS, css, nav
 
 st.set_page_config(
@@ -17,6 +18,11 @@ st.set_page_config(
     page_icon=":material/forest:",
     layout="wide",
 )
+
+# Pieteikšanās (ieslēdzas, kad secrets ir [auth] — sk. views/autentifikacija.py)
+AUTH = pieteiksanas_ieslegta()
+if AUTH:
+    prasit_pieteiksanos()
 
 NOSAUKUMI = {"sakums": "Sākums", "mezs": "Meža inventarizācija", "saglabatie": "Saglabātie",
              "cenradis": "Cenrādis", "ligumi": "Līgumu datu izvilkšana", "atskaites": "Atskaites",
@@ -34,7 +40,10 @@ st.sidebar.markdown("<style>\n" + css(aktiva) + """
 [data-stale="true"], .stale-element {opacity: 1 !important; transition: none !important; filter: none !important;}
 </style>""", unsafe_allow_html=True)
 
-# Lietotāja vārds izmaiņu vēsturei un saglabātajiem priekšvērtējumiem (līdz būs pieteikšanās)
-st.sidebar.text_input(":material/person: Tavs vārds", key="lietotaja_vards",
-                      help="Tiek ierakstīts cenrāža izmaiņu vēsturē un saglabātajos priekšvērtējumos.")
+if AUTH:
+    lietotaja_josla()
+else:
+    # Bez pieteikšanās — vārdu ieraksta pats (izmaiņu vēsturei un saglabātajiem priekšvērtējumiem)
+    st.sidebar.text_input(":material/person: Tavs vārds", key="lietotaja_vards",
+                          help="Tiek ierakstīts cenrāža izmaiņu vēsturē un saglabātajos priekšvērtējumos.")
 pg.run()
