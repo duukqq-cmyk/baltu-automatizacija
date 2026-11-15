@@ -676,6 +676,36 @@ _NOGABALI_JS = Template("""
 {% endmacro %}
 """)
 
+# Attālinot — apkārtējās valstis (Ziemeļeiropa) melnām līnijām, nevis tukšs balts fons.
+# Dati: static/eiropas_robezas.json (Natural Earth), ielādē vienreiz ar fetch, nevis kartes HTML.
+_EIROPA_JS = Template("""
+{% macro script(this, kwargs) %}
+(function() {
+    var karte = {{ this._parent.get_name() }};
+    var pane = karte.createPane("valstis");
+    pane.style.zIndex = 250;            // virs ortofoto, zem nogabaliem un figūrām
+    pane.style.pointerEvents = "none";
+    fetch("/app/static/eiropas_robezas.json").then(function(r) { return r.json(); }).then(function(fc) {
+        var linijas = L.geoJSON(fc, {pane: "valstis", interactive: false, style: function(f) {
+            return {color: "#111", weight: f.properties.lv ? 1.8 : 1.1, opacity: .85, fill: false}; }});
+        var nosaukumi = L.layerGroup();
+        fc.features.forEach(function(f) {
+            L.marker(f.properties.etikete, {pane: "valstis", interactive: false, icon: L.divIcon({
+                className: "valsts-etikete", iconSize: null,
+                html: "<span>" + f.properties.nosaukums + "</span>"})}).addTo(nosaukumi);
+        });
+        function redzamiba() {
+            var z = karte.getZoom();
+            if (z <= 10) { linijas.addTo(karte); } else { linijas.remove(); }   // tuvumā traucētu
+            if (z <= 7) { nosaukumi.addTo(karte); } else { nosaukumi.remove(); }
+        }
+        karte.on("zoomend", redzamiba);
+        redzamiba();
+    }).catch(function() {});
+})();
+{% endmacro %}
+""")
+
 _ZV_JS = Template("""
 {% macro script(this, kwargs) %}
 (function() {
@@ -795,6 +825,9 @@ _STILS = """
   font: 700 11px/1 system-ui, sans-serif; text-shadow: 0 0 3px #000, 0 0 2px #000; padding: 0;}
 .nog-etikete:before {display: none;}
 .nog-popup td {padding: 1px 6px 1px 0; vertical-align: top; font-size: 12px;}
+.valsts-etikete span {font: 600 12px/1 system-ui, sans-serif; color: #111; letter-spacing: .02em;
+  text-shadow: 0 0 3px #fff, 0 0 3px #fff; white-space: nowrap; transform: translate(-50%, -50%);
+  display: inline-block; text-transform: uppercase;}
 .nog-spid {filter: drop-shadow(0 0 4px rgba(255,255,255,.9)) drop-shadow(0 0 9px rgba(255,255,255,.55));
   cursor: pointer;}
 .bk-izvelne {position: absolute; z-index: 1000; min-width: 210px; background: #fff; border-radius: 8px;
@@ -924,6 +957,7 @@ def uzbuvet_karti(iev: dict) -> folium.Map:
         _wms(PARKLAJUMI[nos], caurspidigums, overlay=True).add_to(m)
 
     m.get_root().header.add_child(folium.Element(_STILS))
+    m.add_child(_elements(_EIROPA_JS))
     if iev["zv"]:
         zv_fc = {"type": "FeatureCollection", "features": [
             {"type": "Feature", "geometry": z["geometry"], "properties": {
