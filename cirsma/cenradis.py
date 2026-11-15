@@ -117,3 +117,118 @@ class Cenradis:
                     k.append(f"Novērtējuma kartējums {kol} / {NOV_KOLONNAS.get(lauks, lauks)}: "
                              f"sortimentam '{sort}' nav cenas kailcirtes cenrādī")
         return k
+
+
+# ---------------------------------------------------------------------------
+# Varianti: katrai cenrāža sadaļai (cilnei) vairāki nosaukti varianti, viens — noklusējums
+# ---------------------------------------------------------------------------
+
+ATSLEGA_VARIANTI = "cenradis_varianti"
+SADALAS = ["kailcirte", "kopsana", "izlases", "izdevumi", "kartejums", "noteikumi"]
+SADALU_NOSAUKUMI = {
+    "kailcirte": "Kailcirte", "kopsana": "Kopšanas cirte", "izlases": "Izlases cirte",
+    "izdevumi": "Izdevumi un peļņa", "kartejums": "Novērtējuma kartējums", "noteikumi": "Noteikumi",
+}
+PAMATA = "Pamata"
+
+
+def sadalas_dati(c: Cenradis, sadala: str) -> dict:
+    """Vienas sadaļas dati JSON formā."""
+    j = c.uz_json()
+    if sadala in (KAILCIRTE, KOPSANA, IZLASES):
+        return {"matrica": j["matricas"][sadala]}
+    if sadala == "izdevumi":
+        return {"izdevumi": j["izdevumi"], "pelnas_rezerve": j["pelnas_rezerve"]}
+    if sadala == "kartejums":
+        return {"kartejums": j["kartejums"]}
+    return {"noteikumi": j["noteikumi"]}
+
+
+def ar_sadalu(c: Cenradis, sadala: str, dati: dict) -> Cenradis:
+    """Atgriež cenrāža kopiju, kurā vienas sadaļas dati aizstāti."""
+    j = copy.deepcopy(c.uz_json())
+    if sadala in (KAILCIRTE, KOPSANA, IZLASES):
+        j["matricas"][sadala] = dati["matrica"]
+    elif sadala == "izdevumi":
+        j["izdevumi"] = dati["izdevumi"]
+        j["pelnas_rezerve"] = dati["pelnas_rezerve"]
+    elif sadala == "kartejums":
+        j["kartejums"] = dati["kartejums"]
+    else:
+        j["noteikumi"] = dati["noteikumi"]
+    return Cenradis.no_json(j)
+
+
+@dataclass
+class CenrazaVarianti:
+    """{sadaļa: {"noklusejums": nosaukums, "varianti": {nosaukums: sadaļas dati}}}"""
+    sadalas: dict[str, dict] = field(default_factory=dict)
+
+    @classmethod
+    def no_cenradis(cls, c: Cenradis, nosaukums: str = PAMATA) -> "CenrazaVarianti":
+        return cls({s: {"noklusejums": nosaukums, "varianti": {nosaukums: sadalas_dati(c, s)}}
+                    for s in SADALAS})
+
+    @classmethod
+    def no_json(cls, d: dict | None) -> "CenrazaVarianti":
+        v = cls.no_cenradis(Cenradis())
+        for s, x in ((d or {}).get("sadalas") or {}).items():
+            if s in SADALAS and x.get("varianti"):
+                nokl = x.get("noklusejums") if x.get("noklusejums") in x["varianti"] else next(iter(x["varianti"]))
+                v.sadalas[s] = {"noklusejums": nokl, "varianti": dict(x["varianti"])}
+        return v
+
+    def uz_json(self) -> dict:
+        return {"sadalas": copy.deepcopy(self.sadalas)}
+
+    def nosaukumi(self, sadala: str) -> list[str]:
+        return list(self.sadalas[sadala]["varianti"])
+
+    def noklusejums(self, sadala: str) -> str:
+        return self.sadalas[sadala]["noklusejums"]
+
+    def noklusejuma_izvele(self) -> dict[str, str]:
+        return {s: self.noklusejums(s) for s in SADALAS}
+
+    def kompozicija(self, izvele: dict[str, str] | None = None) -> Cenradis:
+        """Cenrādis no katras sadaļas izvēlētā (vai noklusējuma) varianta."""
+        c = Cenradis()
+        for s in SADALAS:
+            nos = (izvele or {}).get(s)
+            if nos not in self.sadalas[s]["varianti"]:
+                nos = self.noklusejums(s)
+            c = ar_sadalu(c, s, self.sadalas[s]["varianti"][nos])
+        return c
+
+    # --- darbības ar variantiem ------------------------------------------------
+    def izveidot(self, sadala: str, nosaukums: str, no: str | None = None) -> None:
+        nosaukums = nosaukums.strip()
+        if not nosaukums:
+            raise ValueError("Ievadi varianta nosaukumu")
+        if nosaukums in self.sadalas[sadala]["varianti"]:
+            raise ValueError(f"Variants '{nosaukums}' jau ir")
+        avots = no if no in self.sadalas[sadala]["varianti"] else self.noklusejums(sadala)
+        self.sadalas[sadala]["varianti"][nosaukums] = copy.deepcopy(self.sadalas[sadala]["varianti"][avots])
+
+    def parsaukt(self, sadala: str, vecais: str, jaunais: str) -> None:
+        jaunais = jaunais.strip()
+        v = self.sadalas[sadala]["varianti"]
+        if not jaunais or jaunais == vecais:
+            return
+        if jaunais in v:
+            raise ValueError(f"Variants '{jaunais}' jau ir")
+        self.sadalas[sadala]["varianti"] = {(jaunais if k == vecais else k): x for k, x in v.items()}
+        if self.sadalas[sadala]["noklusejums"] == vecais:
+            self.sadalas[sadala]["noklusejums"] = jaunais
+
+    def dzest(self, sadala: str, nosaukums: str) -> None:
+        if nosaukums == self.noklusejums(sadala):
+            raise ValueError("Noklusējuma variantu nevar dzēst — vispirms iestati citu par noklusējumu")
+        self.sadalas[sadala]["varianti"].pop(nosaukums, None)
+
+    def iestatit_noklusejumu(self, sadala: str, nosaukums: str) -> None:
+        if nosaukums in self.sadalas[sadala]["varianti"]:
+            self.sadalas[sadala]["noklusejums"] = nosaukums
+
+    def atjaunot_dati(self, sadala: str, nosaukums: str, dati: dict) -> None:
+        self.sadalas[sadala]["varianti"][nosaukums] = copy.deepcopy(dati)

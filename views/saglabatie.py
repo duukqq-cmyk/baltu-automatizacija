@@ -79,9 +79,7 @@ def _atvert() -> str:
     ielad = {"id": ier["id"], "nosaukums": ier["nosaukums"], "piezimes": d.get("piezimes", "")}
     if d.get("cenradis"):                       # cenas — kā saglabāšanas brīdī (tikai šajā sesijā)
         aktivais_cenradis()
-        ss.cenradis = Cenradis.no_json(d["cenradis"])
-        ss.cenradis_bazes = copy.deepcopy(ss.cenradis)
-        ss.cenradis_versija = ss.get("cenradis_versija", 0) + 1
+        ss.cenradis_ieladets = Cenradis.no_json(d["cenradis"])
 
     if veids == "novertejums":
         ss.nov_faili_sesija = faili
