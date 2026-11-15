@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from .cirtes import CIRTES_NOSAUKUMI, IZLASES, KAILCIRTE, KOPSANA
 from .formula import parse_formula
 from .rules import Vertejums
 
@@ -50,6 +51,18 @@ NOKLUSEJUMA_MATRICA: dict[str, dict[str, tuple[float, float]]] = {
     },
 }
 
+# Kopšanas cirtē vērtīgu sortimentu praktiski nav — tara, papīrmalka, malka.
+NOKLUSEJUMA_KOPSANAS_MATRICA: dict[str, dict[str, tuple[float, float]]] = {
+    "P": {"Tara": (60, 0.40), "Papīrmalka": (50, 0.40), "Malka": (38, 0.20)},
+    "E": {"Tara": (60, 0.40), "Papīrmalka": (50, 0.40), "Malka": (38, 0.20)},
+    "B": {"Tara": (50, 0.30), "Papīrmalka": (40, 0.50), "Malka": (38, 0.20)},
+    "Ma": {"Tara": (50, 0.40), "Malka": (38, 0.60)},
+    "A": {"Tara": (50, 0.30), "Papīrmalka": (45, 0.40), "Malka": (38, 0.30)},
+    "Ba": {"Tara": (50, 0.20), "Malka": (38, 0.80)},
+    "Oz/Os": {"Tara": (60, 0.30), "Kamīnmalka": (50, 0.70)},
+    CITI: {"Malka": (38, 1.00)},
+}
+
 NOKLUSEJUMA_IZDEVUMI = {  # EUR/m3
     "Koku ciršana": 11.0,
     "Kokmateriālu pievešana": 7.0,
@@ -65,6 +78,7 @@ class NogabalaApjoms:
     pa_sugam: dict[str, float]
     metode: str = "formula"           # "formula" vai "sugu tabula"
     nogabals: object | None = None    # atsauce uz Nogabals (vairāku kvartālu gadījumam)
+    cirtes_veids: str = KAILCIRTE
 
 
 def nogabala_apjoms(n) -> tuple[float, dict[str, float], str]:
@@ -98,17 +112,36 @@ def nogabala_apjoms(n) -> tuple[float, dict[str, float], str]:
 
 
 def vertejuma_apjoms(v: Vertejums) -> tuple[float, dict[str, float], str]:
-    """Apjoms vērtējumam: manuāli ievadītais (sugu proporcijas saglabājot) vai aprēķinātais."""
+    """Cērtamais apjoms pēc cirtes veida (sugu proporcijas — no krājas sadalījuma).
+
+    * manuāli ievadīts apjoms aizstāj aprēķināto;
+    * kailcirte — krāja × cērtamā platība (bez atdalošajām joslām);
+    * kopšanas / izlases — izcērtamais G × veidaugstums × platība;
+    * necirst — 0.
+    """
     kopejais, sadalijums, metode = nogabala_apjoms(v.nogabals)
-    if v.apjoms_m3_manuali is None:
+    if v.apjoms_m3_manuali is not None:
+        return (*_merogot(v, kopejais, sadalijums, v.apjoms_m3_manuali), "manuāli")
+    veids = getattr(v, "cirtes_veids", KAILCIRTE if v.atlauta_kailcirte else None)
+    if veids == KAILCIRTE:
+        pl = v.nogabals.platiba_ha
+        cert = v.cirsmas_platiba if v.kailcirtes_ha else pl
+        if pl and cert < pl - 1e-9:
+            jauns = round(kopejais * cert / pl, 2)
+            return (*_merogot(v, kopejais, sadalijums, jauns), metode + f", {cert:g} no {pl:g} ha")
         return kopejais, sadalijums, metode
-    jauns = round(float(v.apjoms_m3_manuali), 2)
+    if veids in (KOPSANA, IZLASES):
+        jauns = v.sk_cirte.apjoms_m3 if v.sk_cirte else 0.0
+        return (*_merogot(v, kopejais, sadalijums, jauns), "šķērslaukums")
+    return 0.0, {}, "necirst"
+
+
+def _merogot(v: Vertejums, kopejais: float, sadalijums: dict[str, float], jauns: float):
+    jauns = round(float(jauns), 2)
     summa = sum(sadalijums.values())
     if summa > 0:
-        sadalijums = {s: round(jauns * m3 / summa, 2) for s, m3 in sadalijums.items()}
-    else:
-        sadalijums = {d.suga: round(jauns * d.ipatsvars, 2) for d in parse_formula(v.nogabals.formula)}
-    return jauns, sadalijums, "manuāli"
+        return jauns, {s: round(jauns * m3 / summa, 2) for s, m3 in sadalijums.items()}
+    return jauns, {d.suga: round(jauns * d.ipatsvars, 2) for d in parse_formula(v.nogabals.formula)}
 
 
 @dataclass
@@ -125,49 +158,79 @@ class FinansuRezultats:
     max_iegades_summa: float
     cena_eur_m3: float
     detalas: list[dict] = field(default_factory=list)  # sortimentu rindas tabulai
+    pa_veidiem: dict[str, dict] = field(default_factory=dict)  # cirtes veids -> m3/EUR
 
 
 def aprekinat(
-    kailcirtes: list[Vertejums],
+    vertejumi: list[Vertejums],
     matrica: dict | None = None,
     izdevumi_eur_m3: dict | None = None,
     pelnas_rezerve: float = NOKLUSEJUMA_PELNAS_REZERVE,
+    matricas: dict[str, dict] | None = None,
+    izdevumi_pa_veidiem: dict[str, dict] | None = None,
 ) -> FinansuRezultats:
-    """Pilns aprēķins: apjomi -> sadalījums pa sugām -> sortimenti -> finanses."""
+    """Pilns aprēķins: apjomi -> sadalījums pa sugām -> sortimenti -> finanses.
+
+    Katram cirtes veidam sava sortimentu matrica un izdevumi (matricas /
+    izdevumi_pa_veidiem); ja nav dotas — kailcirtei un izlases cirtei `matrica`,
+    kopšanai NOKLUSEJUMA_KOPSANAS_MATRICA, izdevumi visiem `izdevumi_eur_m3`.
+    """
     matrica = matrica or NOKLUSEJUMA_MATRICA
     izdevumi_eur_m3 = izdevumi_eur_m3 or NOKLUSEJUMA_IZDEVUMI
+    matricas = {KAILCIRTE: matrica, IZLASES: matrica, KOPSANA: NOKLUSEJUMA_KOPSANAS_MATRICA,
+                **(matricas or {})}
+    izdevumi_pa_veidiem = {**{k: izdevumi_eur_m3 for k in (KAILCIRTE, IZLASES, KOPSANA)},
+                           **(izdevumi_pa_veidiem or {})}
 
     apjomi: list[NogabalaApjoms] = []
     pa_sugam: dict[str, float] = defaultdict(float)
+    veidu_sugas: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
 
-    for v in kailcirtes:
-        if not v.atlauta_kailcirte:
+    for v in vertejumi:
+        veids = getattr(v, "cirtes_veids", KAILCIRTE if v.atlauta_kailcirte else "nav")
+        if veids not in matricas:
             continue
         n = v.nogabals
         kopejais, sadalijums, metode = vertejuma_apjoms(v)
-        apjomi.append(NogabalaApjoms(n.nr, kopejais, dict(sadalijums), metode, n))
+        a = NogabalaApjoms(n.nr, kopejais, dict(sadalijums), metode, n)
+        a.cirtes_veids = veids
+        apjomi.append(a)
         for suga, m3 in sadalijums.items():
             pa_sugam[suga] += m3
+            veidu_sugas[veids][suga] += m3
 
     pa_kolonnam: dict[str, float] = defaultdict(float)
-    for suga, m3 in pa_sugam.items():
-        pa_kolonnam[MATRICAS_KOLONNA.get(suga, CITI)] += m3
-
     sortimentu_ienemumi: dict[str, float] = defaultdict(float)
+    izdevumi: dict[str, float] = defaultdict(float)
     detalas: list[dict] = []
-    for kolonna, m3 in pa_kolonnam.items():
-        for sortiments, (cena, ipatsvars) in matrica.get(kolonna, {}).items():
-            s_m3 = m3 * ipatsvars
-            eur = s_m3 * cena
-            sortimentu_ienemumi[sortiments] += eur
-            detalas.append({
-                "Suga": kolonna, "Sortiments": sortiments, "Īpatsvars": ipatsvars,
-                "Apjoms m3": round(s_m3, 2), "Cena EUR/m3": cena, "Summa EUR": round(eur, 2),
-            })
+    pa_veidiem: dict[str, dict] = {}
+    for veids, sugas in veidu_sugas.items():
+        kol_m3: dict[str, float] = defaultdict(float)
+        for suga, m3 in sugas.items():
+            kol_m3[MATRICAS_KOLONNA.get(suga, CITI)] += m3
+        ien = 0.0
+        for kolonna, m3 in kol_m3.items():
+            pa_kolonnam[kolonna] += m3
+            for sortiments, (cena, ipatsvars) in matricas[veids].get(kolonna, {}).items():
+                s_m3 = m3 * ipatsvars
+                eur = s_m3 * cena
+                ien += eur
+                sortimentu_ienemumi[sortiments] += eur
+                detalas.append({
+                    "Cirte": CIRTES_NOSAUKUMI[veids], "Suga": kolonna, "Sortiments": sortiments,
+                    "Īpatsvars": ipatsvars, "Apjoms m3": round(s_m3, 2), "Cena EUR/m3": cena,
+                    "Summa EUR": round(eur, 2),
+                })
+        m3_v = sum(kol_m3.values())
+        izd_v = 0.0
+        for poz, likme in izdevumi_pa_veidiem[veids].items():
+            izdevumi[poz] += likme * m3_v
+            izd_v += likme * m3_v
+        pa_veidiem[veids] = {"m3": round(m3_v, 2), "ienemumi": round(ien, 2),
+                             "izdevumi": round(izd_v, 2), "segums": round(ien - izd_v, 2)}
 
     kopejais_m3 = sum(pa_kolonnam.values())
     ienemumi = sum(sortimentu_ienemumi.values())
-    izdevumi = {poz: likme * kopejais_m3 for poz, likme in izdevumi_eur_m3.items()}
     izdevumi_kopa = sum(izdevumi.values())
     segums = ienemumi - izdevumi_kopa
     pelna = segums * pelnas_rezerve
@@ -189,4 +252,5 @@ def aprekinat(
         max_iegades_summa=round(max_summa, 2),
         cena_eur_m3=round(max_summa / kopejais_m3, 2) if kopejais_m3 else 0.0,
         detalas=detalas,
+        pa_veidiem=pa_veidiem,
     )

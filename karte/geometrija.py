@@ -25,6 +25,7 @@ STATUSI: dict[str, str] = {          # statuss -> krāsa kartē
     "Kailcirte": "#ff4b4b",      # tāda pati kā aplikācijas pogas
     "Kopšanas cirte": "#f59e0b",
     "Izlases cirte": "#a855f7",
+    "Atdalošā josla": "#78716c",
     "Krautuve / ceļš": "#3b82f6",
     "Neiekļaut": "#9ca3af",
     "Cits": "#14b8a6",
@@ -65,6 +66,46 @@ def mervienibas(geometry: dict) -> dict:
         return {"platiba_ha": round(g.area / 10_000, 4), "garums_m": round(g.length, 1),
                 "x": round(c.x), "y": round(c.y)}
     return {"platiba_ha": 0.0, "garums_m": round(g.length, 1), "x": round(c.x), "y": round(c.y)}
+
+
+def wgs_geometrija(g) -> dict:
+    """shapely ģeometrija LKS-92 -> GeoJSON ģeometrija (WGS84, 6 zīmes)."""
+    t = _no_lks()
+    w = shapely.transform(g, lambda c: np.round(np.column_stack(t(c[:, 0], c[:, 1])), 6))
+    return shapely.geometry.mapping(w)
+
+
+def sadalit_poligonu(g, platibas_ha: list[float]):
+    """Sadala LKS-92 poligonu secīgās joslās pa garāko asi ar dotajām platībām.
+
+    Atgriež gabalu sarakstu (len = len(platibas_ha) + 1 — pēdējais ir atlikums,
+    var būt tukšs). Griež ar taisnēm, kas perpendikulāras garākajai asij, platību
+    meklējot ar bisekciju (precizitāte ~1 m²).
+    """
+    import shapely.affinity as aff  # noqa: PLC0415
+    rect = g.minimum_rotated_rectangle
+    xy = list(rect.exterior.coords)[:4]
+    malas = [(xy[i], xy[(i + 1) % 4]) for i in range(4)]
+    (ax, ay), (bx, by) = max(malas, key=lambda m: (m[1][0] - m[0][0]) ** 2 + (m[1][1] - m[0][1]) ** 2)
+    lenkis = np.degrees(np.arctan2(by - ay, bx - ax))
+    c = g.centroid
+    r = aff.rotate(g, -lenkis, origin=c)          # garākā ass -> X ass
+    minx, miny, maxx, maxy = r.bounds
+    gabali, sakums = [], minx
+    for ha in platibas_ha:
+        merkis = ha * 10_000
+        lo, hi = sakums, maxx
+        for _ in range(60):
+            vid = (lo + hi) / 2
+            if r.intersection(shapely.box(sakums, miny - 1, vid, maxy + 1)).area < merkis:
+                lo = vid
+            else:
+                hi = vid
+        gabals = r.intersection(shapely.box(sakums, miny - 1, hi, maxy + 1))
+        gabali.append(gabals)
+        sakums = hi
+    gabali.append(r.intersection(shapely.box(sakums, miny - 1, maxx + 1, maxy + 1)))
+    return [aff.rotate(x, lenkis, origin=c) for x in gabali]
 
 
 def ir_laukums(obj: dict) -> bool:
@@ -337,7 +378,7 @@ def uz_kml(objekti: list[dict], dokuments: str = "Cirsmas") -> str:
 
 
 __all__ = [
-    "STATUSI", "apvienot_ar_zimejumiem", "ir_laukums", "jauns_objekts", "kopplatiba_ha",
+    "STATUSI", "apvienot_ar_zimejumiem", "sadalit_poligonu", "wgs_geometrija", "ir_laukums", "jauns_objekts", "kopplatiba_ha",
     "lks_geometrija", "lks_uz_wgs", "mervienibas", "nolasit_failu", "nolasit_geojson",
     "nolasit_kml", "objekta_krasa", "parklasanas", "robezas", "uz_geojson", "uz_kml",
 ]

@@ -13,11 +13,15 @@ from cirsma.parser import parse_inventory_pdf
 from cirsma.labojumi import (
     BONITATES, Labojums, labojumu_izmainas, nogabala_atslega, novertet_ar_labojumiem,
 )
-from cirsma.sortiment import (
-    aprekinat, vertejuma_apjoms, NOKLUSEJUMA_MATRICA, NOKLUSEJUMA_IZDEVUMI, NOKLUSEJUMA_PELNAS_REZERVE,
+from cirsma.cirtes import CIRTES_NOSAUKUMI, NOSAUKUMS_UZ_VEIDU
+from cirsma.sortiment import aprekinat, vertejuma_apjoms
+from cirsma.report import (
+    cirsmas_rindas, teksta_atskaite, excel_atskaite, nog_nosaukums, atrast_apjomu,
 )
-from cirsma.report import teksta_atskaite, excel_atskaite, nog_nosaukums, atrast_apjomu
 from cirsma.formula import SUGU_NOSAUKUMI
+from cirsma import priekvertejums as pv
+from cirsma.pdf_atskaite import priekvertejuma_pdf
+from views.kopigi import aktivais_cenradis, cenradis_statuss_sanjosla, glabatuve, lietotajs
 
 @st.cache_data(show_spinner="Nolasa PDF…")
 def _nolasit(pdf_baiti: bytes):
@@ -35,7 +39,7 @@ def _saglabat_pdf(pdf_baiti: bytes) -> str:
 
 _KOLONNA_LAUKS = {
     "Platība ha": "platiba_ha", "Krāja m³/ha": "kraja_m3_ha", "Bonitāte": "bonitate",
-    "Vecums": "vecums", "Kailcirte": "kailcirte", "Apjoms m³": "apjoms_m3",
+    "Vecums": "vecums", "Cirtes veids": "cirtes_veids", "Apjoms m³": "apjoms_m3",
 }
 
 
@@ -52,6 +56,9 @@ def _saglabat_labojumus(redaktora_atslega: str, atslegas: list[str]) -> None:
                 continue
             if isinstance(vertiba, float) and vertiba != vertiba:  # NaN = dzēsta šūna
                 vertiba = None
+            if lauks == "cirtes_veids":
+                vertiba = NOSAUKUMS_UZ_VEIDU.get(vertiba) if vertiba else None  # None -> automātiski
+                lab.kailcirte = None
             setattr(lab, lauks, vertiba)  # None -> atpakaļ uz PDF vērtību
             if lauks in ("platiba_ha", "kraja_m3_ha"):
                 lab.apjoms_m3 = None  # apjoms jāpārrēķina no jaunās platības/krājas
@@ -76,8 +83,9 @@ if avots == AVOTS_NOVERTEJUMS:
 if avots == AVOTS_PDF:
     st.caption(
         "Augšupielādē nogabalu raksturojošo rādītāju PDF (VMD vai gabali.lv — formātu atpazīst "
-        "automātiski). Sistēma atlasa kailcirtei atbilstošos nogabalus, aprēķina apjomu pa sugām "
-        "un maksimālo iegādes summu, kā arī atzīmē riskus (aizsargjoslas, VMD plānotā darbība u.c.)."
+        "automātiski). Sistēma katram nogabalam nosaka cirtes veidu — kailcirte (platība pēc meža tipa: "
+        "sausieņos ≤ 5 ha, citur ≤ 2 ha), kopšanas cirte (pēc šķērslaukuma) vai necirst; izlases cirti "
+        "izvēlies kolonnā **Cirtes veids**. Aprēķina apjomu, sortimentus, iegādes summu un atzīmē riskus."
     )
 else:
     st.caption(
@@ -85,34 +93,9 @@ else:
         "platības — no kartes. Cenas un izdevumus maini sānjoslā; nogabalu tabulā vari vēl labot vērtības."
     )
 
-# --- Sānjosla: rediģējamas cenas un izdevumi -------------------------------
-st.sidebar.header("Sortimentu cenas un izdevumi")
-matrica = copy.deepcopy(NOKLUSEJUMA_MATRICA)
-with st.sidebar.expander("Sortimentu cenas (EUR/m3) un īpatsvari (%)", expanded=False):
-    for kolonna, sortimenti in matrica.items():
-        st.markdown(f"**{kolonna}**")
-        for sortiments, (cena, ipatsvars) in sortimenti.items():
-            k_cena, k_proc = st.columns([3, 2])
-            jauna = k_cena.number_input(
-                f"{kolonna} · {sortiments}",
-                min_value=0.0, value=float(cena), step=1.0,
-                key=f"cena_{kolonna}_{sortiments}",
-            )
-            proc = k_proc.number_input(
-                "%", min_value=0.0, max_value=100.0, value=round(ipatsvars * 100, 2),
-                step=1.0, format="%.1f", key=f"ipatsvars_{kolonna}_{sortiments}",
-                help=f"Sortimenta {sortiments} īpatsvars sugas ({kolonna}) apjomā",
-            )
-            matrica[kolonna][sortiments] = (jauna, proc / 100)
-        summa = sum(i for _, i in matrica[kolonna].values())
-        if abs(summa - 1) > 1e-6:
-            st.warning(f"{kolonna}: īpatsvaru summa {summa:.1%} (jābūt 100%)")
-
-izdevumi = {}
-with st.sidebar.expander("Izdevumi (EUR/m3)", expanded=True):
-    for poz, likme in NOKLUSEJUMA_IZDEVUMI.items():
-        izdevumi[poz] = st.number_input(poz, min_value=0.0, value=float(likme), step=0.5)
-pelna = st.sidebar.slider("Peļņas rezerve, %", 0, 50, int(NOKLUSEJUMA_PELNAS_REZERVE * 100)) / 100
+# --- Cenrādis (kopīgs visām sadaļām; maina lapā "Cenrādis") -------------------
+cenradis = aktivais_cenradis()
+cenradis_statuss_sanjosla()
 
 # --- Dati: no kartes ----------------------------------------------------------
 if avots == AVOTS_KARTE:
@@ -131,6 +114,9 @@ if avots == AVOTS_KARTE:
     if st.session_state.get("faila_id") != faila_id:
         # Jauni kartes mērījumi -> labojumi no kartes (tabulā tos var labot tālāk)
         st.session_state.faila_id = faila_id
+        st.session_state.pop("priekvertejums", None)
+        if st.session_state.get("priekvertejums_gaida"):   # atvērts no Saglabātie caur karti
+            st.session_state.priekvertejums = st.session_state.pop("priekvertejums_gaida")
         st.session_state.labojumi = copy.deepcopy(ka["labojumi"])
         st.session_state.tabulas_versija = st.session_state.get("tabulas_versija", 0) + 1
 
@@ -163,17 +149,20 @@ if avots == AVOTS_PDF:
         st.session_state.faila_id = faila_id
         st.session_state.labojumi = {}
         st.session_state.tabulas_versija = 0
+        st.session_state.pop("priekvertejums", None)
 labojumi: dict[str, Labojums] = st.session_state.labojumi
 
 try:
-    vertejumi = novertet_ar_labojumiem(inv.nogabali, labojumi)
-    fin = aprekinat(vertejumi, matrica=matrica, izdevumi_eur_m3=izdevumi, pelnas_rezerve=pelna)
+    vertejumi = novertet_ar_labojumiem(inv.nogabali, labojumi, cenradis.noteikumi)
+    fin = aprekinat(vertejumi, matricas=cenradis.matricas, izdevumi_pa_veidiem=cenradis.izdevumi,
+                    pelnas_rezerve=cenradis.pelnas_rezerve)
+    pelna = cenradis.pelnas_rezerve
 except Exception as e:  # noqa: BLE001
     st.error(f"Neizdevās aprēķināt: {e}")
     st.stop()
 
 # --- Rezultāti -------------------------------------------------------------
-cirt = [v for v in vertejumi if v.atlauta_kailcirte]
+cirt = [v for v in vertejumi if v.cirtams]
 riski = [v for v in cirt if any(b.startswith("⚠") for b in v.bridinajumi)]
 laboti = [v for v in vertejumi if any(b.startswith("✎") for b in v.bridinajumi)]
 gabali = inv.avots == "gabali.lv"
@@ -186,6 +175,11 @@ c1.metric("Cērtamais apjoms", f"{fin.kopejais_m3:,.0f} m³")
 c2.metric("Ieņēmumi", f"{fin.ienemumi_kopa:,.0f} EUR")
 c3.metric("Max iegādes summa", f"{fin.max_iegades_summa:,.0f} EUR")
 c4.metric("Cena", f"{fin.cena_eur_m3:.2f} EUR/m³")
+if fin.pa_veidiem:
+    st.caption(" · ".join(
+        f"**{CIRTES_NOSAUKUMI[k]}**: {sum(1 for v in cirt if v.cirtes_veids == k)} nog., "
+        f"{d['m3']:,.0f} m³, segums {d['segums']:,.0f} EUR".replace(",", " ")
+        for k, d in fin.pa_veidiem.items()))
 
 if riski:
     st.warning(
@@ -207,8 +201,12 @@ for v in vertejumi:
         "Formula": n.formula,
         "Bonitāte": n.bonitate,
         "Vecums": n.vecums,
+        "Meža tips": n.meza_tips,
+        "Augst. m": n.vid_augstums,
+        "G m²/ha": n.skerslaukums,
         "Valdošā suga": SUGU_NOSAUKUMI.get(v.valdosa_suga, v.valdosa_suga),
-        "Kailcirte": v.atlauta_kailcirte,
+        "Cirtes veids": v.cirtes_nosaukums,
+        "Cērt. ha": v.cirsmas_platiba or None,
         "Apjoms m³": apjoms,
         "Karogi": karogi,
     }
@@ -219,14 +217,18 @@ for v in vertejumi:
     atslegas.append(nogabala_atslega(v.indekss))
 
 redaktora_atslega = f"nogabali_{faila_id[:8]}_{st.session_state.tabulas_versija}"
+tabula = pd.DataFrame(rindas)
+for kol in ("Augst. m", "G m²/ha", "Cērt. ha", "Krāja m³/ha", "Vecums"):
+    tabula[kol] = pd.to_numeric(tabula[kol], errors="coerce")
 st.data_editor(
-    pd.DataFrame(rindas),
+    tabula,
     key=redaktora_atslega,
     on_change=_saglabat_labojumus,
     args=(redaktora_atslega, atslegas),
     hide_index=True,
     use_container_width=True,
-    disabled=["Nog.", "Formula", "Valdošā suga", "Karogi", "Info no PDF", "Pamatojums"],
+    disabled=["Nog.", "Formula", "Meža tips", "Augst. m", "G m²/ha", "Valdošā suga", "Cērt. ha",
+              "Karogi", "Info no PDF", "Pamatojums"],
     column_config={
         "Platība ha": st.column_config.NumberColumn(
             min_value=0.0, step=0.01, format="%.2f",
@@ -240,8 +242,13 @@ st.data_editor(
         "Vecums": st.column_config.NumberColumn(
             min_value=0, max_value=300, step=1, format="%d",
             help="Mainot pārvērtē kailcirtes atbilstību. Notīri šūnu, lai atjaunotu PDF vērtību."),
-        "Kailcirte": st.column_config.CheckboxColumn(
-            help="Ieķeksē vai izķeksē, lai iekļautu vai izslēgtu nogabalu no cirsmas."),
+        "Cirtes veids": st.column_config.SelectboxColumn(
+            options=list(CIRTES_NOSAUKUMI.values()),
+            help="Sistēma izvēlas automātiski (kailcirte → kopšana → necirst). Izlases cirti izvēlies "
+                 "manuāli. Notīri šūnu, lai atgrieztos pie automātiskā lēmuma."),
+        "Cērt. ha": st.column_config.NumberColumn(
+            format="%.2f", help="Faktiski cērtamā platība — kailcirtei bez atdalošajām joslām"),
+        "G m²/ha": st.column_config.NumberColumn(format="%.0f", help="Šķērslaukums"),
         "Apjoms m³": st.column_config.NumberColumn(
             min_value=0.0, step=0.01, format="%.2f",
             help="Manuāli ievadīts apjoms aizstāj aprēķināto. Notīri šūnu, lai atjaunotu aprēķināto."),
@@ -254,7 +261,7 @@ st.data_editor(
 
 if labojumi:
     l1, l2 = st.columns([3, 1])
-    izmainas = labojumu_izmainas(inv.nogabali, labojumi)
+    izmainas = labojumu_izmainas(inv.nogabali, labojumi, cenradis.noteikumi)
     atsifrejums = "\n".join(
         f"- **{nog_nosaukums(inv, inv.nogabali[i])}** — " + "; ".join(r)
         for i, r in sorted(izmainas.items())
@@ -276,9 +283,18 @@ if ar_info:
         for v in ar_info:
             n = v.nogabals
             st.markdown(f"**{nog_nosaukums(inv, n)}** "
-                        f"({'cērtams' if v.atlauta_kailcirte else 'necērtams'}, {n.formula})")
+                        f"({v.cirtes_nosaukums.lower()}, {n.formula})")
             punkti = list(n.pdf_apraksts if gabali else []) + v.bridinajumi
             st.markdown("\n".join(f"- {p}" for p in punkti))
+
+c_rindas = cirsmas_rindas(inv, vertejumi, fin)
+if c_rindas:
+    st.subheader("Cirsmas")
+    st.caption("Katra cirsma atsevišķā rindā. Ja kailcirte pārsniedz max platību pēc meža tipa, "
+               "nogabals sadalīts vairākās kailcirtēs ar atdalošo joslu starp tām.")
+    st.dataframe(pd.DataFrame(c_rindas), use_container_width=True, hide_index=True,
+                 column_config={"Platība ha": st.column_config.NumberColumn(format="%.2f"),
+                                "Apjoms m³": st.column_config.NumberColumn(format="%.2f")})
 
 kol1, kol2 = st.columns(2)
 with kol1:
@@ -311,3 +327,65 @@ with st.expander("Gala atskaite", expanded=False):
                            file_name="cirsmas_atskaite.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     st.download_button("⬇️ Lejupielādēt teksta atskaiti", atskaite, file_name="cirsmas_atskaite.txt")
+
+
+# --- Saglabāšana un eksports ---------------------------------------------------
+st.subheader("💾 Saglabāt priekšvērtējumu")
+ss = st.session_state
+ielad = ss.get("priekvertejums")          # {"id", "nosaukums", "piezimes"} — ja atvērts no saglabātajiem
+kad = (ss.get("karte_aprekins") or {}).get("kadastrs") if avots == AVOTS_KARTE else None
+kad = kad or inv.zemes_vieniba
+noklusetais = (ielad or {}).get("nosaukums") or " · ".join(
+    x for x in (inv.ipasums, kad) if x) or "Priekšvērtējums"
+k1, k2 = st.columns([2, 3])
+nosaukums = k1.text_input("Nosaukums", value=noklusetais, key=f"pv_nos_{faila_id[:8]}")
+piezimes = k2.text_area("Piezīmes (nonāk PDF)", value=(ielad or {}).get("piezimes", ""), height=68,
+                        key=f"pv_piez_{faila_id[:8]}")
+karte_dati = ss.get("karte_aprekins") if avots == AVOTS_KARTE else None
+try:
+    pdf_baiti_atsk = priekvertejuma_pdf(
+        inv, vertejumi, fin, nosaukums=nosaukums, autors=lietotajs(),
+        objekti=(karte_dati or {}).get("objekti"), robezas=(karte_dati or {}).get("robezas"),
+        piezimes=piezimes)
+except Exception as e:  # noqa: BLE001
+    pdf_baiti_atsk = None
+    st.warning(f"PDF atskaiti neizdevās izveidot: {e}")
+
+g = glabatuve()
+kops = pv.kopsavilkums(inv, vertejumi, fin)
+
+
+def _saglabat(parrakstit: bool) -> None:
+    avota_pdf = ss.inv_pdf if ss.get("inv_pdf") and (avots == AVOTS_PDF or (
+        karte_dati and "PDF" in karte_dati.get("apraksts", ""))) else None
+    d = pv.dati(avots="karte" if avots == AVOTS_KARTE else "pdf", labojumi=labojumi,
+                cenradis_json=cenradis.uz_json(), objekti=(karte_dati or {}).get("objekti"),
+                kadastrs=kad, pdf_nosaukums=avota_pdf["nosaukums"] if avota_pdf else None,
+                piezimes=piezimes, atskaite_pdf=pdf_baiti_atsk)
+    id_ = g.saglabat_priekvertejumu(
+        kadastrs=kad, nosaukums=nosaukums, avots=d["avots"], dati=d, kopsavilkums=kops,
+        autors=lietotajs(), pdf=avota_pdf["baiti"] if avota_pdf else None,
+        pdf_nosaukums=avota_pdf["nosaukums"] if avota_pdf else None,
+        id_=ielad["id"] if (parrakstit and ielad) else None)
+    ss.priekvertejums = {"id": id_, "nosaukums": nosaukums, "piezimes": piezimes}
+    st.toast(f"Saglabāts: {nosaukums}", icon="💾")
+
+
+b1, b2, b3 = st.columns(3)
+if ielad:
+    b1.button(f"💾 Saglabāt izmaiņas", type="primary", use_container_width=True, disabled=g is None,
+              on_click=_saglabat, args=(True,), help=f"Pārraksta atvērto priekšvērtējumu ({ielad['id']})")
+    b2.button("💾 Saglabāt kā jaunu", use_container_width=True, disabled=g is None,
+              on_click=_saglabat, args=(False,))
+else:
+    b1.button("💾 Saglabāt", type="primary", use_container_width=True, disabled=g is None,
+              on_click=_saglabat, args=(False,),
+              help="Saglabā avota PDF, labojumus, kartes poligonus, cenas un rezultātu. Atrodams lapā "
+                   "Saglabātie pēc kadastra numura.")
+if pdf_baiti_atsk:
+    b3.download_button("⬇️ PDF atskaite", pdf_baiti_atsk, use_container_width=True,
+                       file_name=f"priekvertejums_{kad or 'cirsma'}.pdf", mime="application/pdf")
+with st.expander("📋 Teksts monday / e-pastam"):
+    st.code(pv.monday_teksts(nosaukums, kops), language=None)
+    st.caption("Ielīmē monday ieraksta Updates un pievieno PDF atskaiti. Automātiska augšupielāde "
+               "monday būs, kad zināms boards un kolonnas.")

@@ -99,6 +99,7 @@ class Nogabals:
     komentari: str | None = None
     inventarizacija: str | None = None      # "Nogabala meža inventarizācija veikta 2026. gadā."
     labots: set[str] = field(default_factory=set)  # lietotāja manuāli labotie lauki
+    kartes_dalas: list[float] | None = None  # kartē uzzīmēto kailciršu platības (ha) šajā nogabalā
 
     @property
     def pdf_apraksts(self) -> list[str]:
@@ -182,6 +183,11 @@ def parse_vmd_pdf(pdf_path: str) -> Inventarizacija:
         if m:
             aste_skaitli = re.findall(r"\d+(?:[.,]\d+)?", m.group("aste"))
             kraja = _norm_num(aste_skaitli[-1]) if aste_skaitli else None
+            # aste: biezība, šķērslaukums m²/ha, [koku skaits gab/ha], krāja m³/ha
+            # (jaunaudzēm G nav, tā vietā koku skaits, piem., "12 4000 50")
+            g = _norm_num(aste_skaitli[1]) if len(aste_skaitli) >= 3 else None
+            if g is not None and g > 80:
+                g = None
             pedejais = Nogabals(
                 nr=int(m.group("nog")),
                 platiba_ha=_norm_num(m.group("platiba")),
@@ -195,6 +201,7 @@ def parse_vmd_pdf(pdf_path: str) -> Inventarizacija:
                 vecums=int(m.group("vecums")),
                 kraja_m3_ha=kraja,
                 kvartals=kvartals,
+                skerslaukums=g,
             )
             nogabali.append(pedejais)
             continue

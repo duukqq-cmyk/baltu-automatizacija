@@ -21,9 +21,9 @@ PDF ──► parser.py ──► rules.py ──► sortiment.py ──► repo
 1. **Datu nolasīšana** (`cirsma/parser.py`) — `pdfplumber` izvelk taksācijas
    tabulu: nogabals, platība, mežaudzes formula, bonitāte, vid. caurmērs,
    vecums, krāja m³/ha. Formulas turpinājumi nākamajā rindā tiek apvienoti.
-2. **Kailcirtes atlase** (`cirsma/rules.py`) — noteikumu dzinējs: valdošā suga
+2. **Cirtes veida noteikšana** (`cirsma/rules.py`) — noteikumu dzinējs: valdošā suga
    sasniegusi galvenās cirtes vecumu (pēc sugas un bonitātes grupas) VAI
-   valdaudzes caurmēru (P/E/B); baltalksnis — bez ierobežojuma. Katram
+   valdaudzes caurmēru (P/E/B); baltalksnis — ≥ 25 g. vai ≥ 16 cm. Citādi kopšana pēc šķērslaukuma. Katram
    nogabalam tiek saglabāts lēmuma pamatojums (audits/izsekojamība).
 3. **Apjomi** (`cirsma/sortiment.py`) — krāja × platība; sadalījums pa sugām
    pēc mežaudzes formulas (piem. `4Ba3B37 2Ba26 1A47` = 60% Ba, 30% B, 10% A).
@@ -36,6 +36,24 @@ PDF ──► parser.py ──► rules.py ──► sortiment.py ──► repo
    + Excel ar 3 lapām (kopsavilkums, nogabalu vērtējums ar pamatojumiem,
    sortimentu aprēķins).
 
+## 🪓 Cirtes veidi, cenrādis un saglabāšana
+
+Sīkāk — [UZLABOJUMI.md](UZLABOJUMI.md).
+
+- **Cirtes veids katram nogabalam** (`cirsma/cirtes.py`, `cirsma/rules.py`): kailcirte (max 5 ha
+  sausieņos, 2 ha pārējos; lielāku sadala ar 0,5 ha atdalošo joslu) → kopšanas cirte (G − (Gmin+1) ≥ 4,
+  apjoms = izcērtamais G × veidaugstums × platība) → necirst. Izlases cirti (Gkrit+1) izvēlas manuāli.
+  Baltalksnis — kailcirte no 25 g. vai 16 cm.
+- **Cenrādis** (`views/cenradis.py`, `cirsma/cenradis.py`): sortimentu matricas un izdevumi katram
+  cirtes veidam, peļņas rezerve, noteikumi, novērtējuma kartējums; saglabā datubāzē ar vēsturi.
+- **Saglabātie** (`views/saglabatie.py`, `glabatuve.py`): priekšvērtējums (avota PDF, labojumi, kartes
+  poligoni, cenas, rezultāts) — meklē pēc kadastra. Datubāze: `DATABASE_URL` (Postgres) vai SQLite
+  `dati/baltu.db`.
+- **PDF atskaite** (`cirsma/pdf_atskaite.py`) ar cirsmu skici; teksts monday/e-pastam.
+- **Karte**: atrodot zemes vienību, cērtamie nogabali tiek iezīmēti automātiski (kailcirte virs limita —
+  sagriezta: kailcirte + josla + kailcirte); laukuma statuss nosaka cirtes veidu; brīdina, ja
+  saskarošās kailcirtes kopā pārsniedz limitu.
+
 ## 🧮 Cirsmas novērtējums (summu kalkulators)
 
 Trešais režīms lapā *Meža inventarizācija* (`views/novertejums.py`, loģika `cirsma/novertejums.py`).
@@ -43,7 +61,8 @@ Ievelc vienu vai vairākus **CIRSMAS NOVĒRTĒJUMS** PDF → sistēma nolasa kat
 Formātu atpazīst automātiski: **Mežvērte** (viens nogabals, ar € vērtībām) vai **pārdodamās cirsmas**
 ("Pārdod. cirsmas nr.", daudz cirsmu vienā PDF pa lapām, cirsmā var būt vairāki nogabali, tikai m³). Pēc noklusējuma rāda **nogabalu skaitu un platību**;
 ar ⚙️ var ieslēgt vērtības (kopā / cirsmas / biomasas, €/ha, €/m³), krājas, sortimentus, koku skaitu
-un sadalījumu pa sugām. Brīdina par dublikātiem un nesakrītošām PDF kontrolsummām; CSV eksports.
+un sadalījumu pa sugām. **Vērtība pēc sortimentiem**: uzmērītie kubi (Resnā/Vidējā/Tievā/P.malka/Malka)
+→ sortimenti × Cenrāža cenas − izdevumi − peļņas rezerve, salīdzinājums ar Mežvērtes vērtību. Brīdina par dublikātiem un nesakrītošām PDF kontrolsummām; CSV eksports.
 
 ## Palaišana
 
@@ -208,6 +227,8 @@ Demo režīms (`atskaites/demo.py`) ļauj sadaļu izmēģināt bez tokena.
   ģeometrija no WMS nav nolasāma, tāpēc laukums nogabalam tiek piesaistīts manuāli.
 
 ## Verifikācija pret pamācības piemēru
+
+(Tikai kailcirtes, kā pamācībā. Ar jaunajiem noteikumiem šim īpašumam klāt nāk 5.nog kopšanas cirte, 21 m³.)
 
 | Rādītājs | Pamācībā | Sistēmas rezultāts |
 |---|---|---|

@@ -41,7 +41,8 @@ def rezultats():
         pytest.skip("Nav pieejams parauga PDF")
     inv = parse_inventory_pdf(PDF)
     vertejumi = atlasit_kailcirtes(inv.nogabali)
-    return inv, vertejumi, aprekinat(vertejumi)
+    # Pamācības piemērs vērtē tikai kailcirtes (kopšanas cirtes — atsevišķs tests)
+    return inv, vertejumi, aprekinat([v for v in vertejumi if v.cirtes_veids == "kailcirte"])
 
 
 def test_kailcirtes_atlase(rezultats):
@@ -85,3 +86,16 @@ def test_formulas_turpinajums_ar_salipusam_grupam():
     dalas = parse_formula("4P1312P912B81 1E911E131")
     assert sum(d.ipatsvars for d in dalas) == pytest.approx(1.0)
     assert dalas[0].suga == "P" and dalas[0].vecums == 131
+
+
+def test_kopsana_piemera(rezultats):
+    """5.nog (7B47, H 20, G 18): bērzs nav cērtams, kopšana (18 − (13+1)) × 9,09 × 0,58."""
+    _, vertejumi, _ = rezultats
+    v = next(v for v in vertejumi if v.nogabals.nr == 5)
+    assert v.cirtes_veids == "kopsana"
+    assert v.sk_cirte.apjoms_m3 == pytest.approx(4 * 9.09 * 0.58, abs=0.01)
+    v9 = next(v for v in vertejumi if v.nogabals.nr == 9)  # izcērtamais G 3 < 4
+    assert v9.cirtes_veids == "nav"
+    kopa = aprekinat(vertejumi)
+    assert kopa.pa_veidiem["kopsana"]["m3"] == pytest.approx(21.09, abs=0.01)
+    assert kopa.kopejais_m3 == pytest.approx(1038.94 + 21.09, abs=0.5)

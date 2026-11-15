@@ -51,7 +51,7 @@ def test_kailcirtes_kekss(inv):
     vs = novertet_ar_labojumiem(inv.nogabali, {atsl: Labojums(kailcirte=False)})
     fin1 = aprekinat(vs)
     assert not _v(vs, atsl).atlauta_kailcirte
-    assert _v(vs, atsl).pamatojums.startswith("✎ Manuāli izķeksēts")
+    assert _v(vs, atsl).pamatojums.startswith("✎ Manuāli: Necirst")
     assert fin1.kopejais_m3 == pytest.approx(fin0.kopejais_m3 - _apjoms(fin0, cirt), abs=0.05)
     # atpakaļ ieķeksēts = sakrīt ar sistēmu -> nav labojuma karoga
     vs2 = novertet_ar_labojumiem(inv.nogabali, {atsl: Labojums(kailcirte=True)})
@@ -60,7 +60,8 @@ def test_kailcirtes_kekss(inv):
 
 def test_platiba_parrekina_apjomu(inv):
     base = novertet_ar_labojumiem(inv.nogabali)
-    v0 = next(v for v in base if v.atlauta_kailcirte)
+    # dubultā platība nedrīkst pārsniegt max kailcirtes platību (citādi to sadala)
+    v0 = next(v for v in base if v.atlauta_kailcirte and v.nogabals.platiba_ha * 2 <= 2)
     atsl = str(v0.indekss)
     vs = novertet_ar_labojumiem(inv.nogabali, {atsl: Labojums(platiba_ha=v0.nogabals.platiba_ha * 2)})
     fin0, fin1 = aprekinat(base), aprekinat(vs)
@@ -106,7 +107,7 @@ def test_labojumu_izmainas_uzskaita_tikai_lietotaja_vertibas(inv):
     izm = labojumu_izmainas(inv.nogabali, lab)
     rindas = izm[v0.indekss]
     assert any(r.startswith("Platība:") and "→" in r for r in rindas)
-    assert any(r.startswith("Kailcirte:") for r in rindas)
+    assert any(r.startswith("Cirtes veids:") for r in rindas)
     assert not any(r.startswith("Apjoms:") for r in rindas)  # pārrēķinātais apjoms nav labojums
 
 

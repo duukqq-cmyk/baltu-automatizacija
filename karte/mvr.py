@@ -156,6 +156,8 @@ def uz_nogabalu(rinda) -> Nogabals:
         n.vid_caurmers = _sk(rinda.get("d10"), int)
         n.vecums = _sk(rinda.get("a10"), int)
         n.kraja_m3_ha = _sk(rinda.get("v_nog"))
+        g = [x for x in (_sk(rinda.get(f"g{i}")) for i in range(10, 15)) if x]
+        n.skerslaukums = round(sum(g), 1) if g else None   # 1. stāva sugu G summa
         n.plantacija = _kods(rinda.get("plant_audz")) == "1"
     darb = _kods(rinda.get("p_darbv"))
     if darb:

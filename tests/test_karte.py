@@ -123,7 +123,7 @@ def test_parrekins_pec_kartes():
     o["nogabals"] = n.apzimejums
 
     lab = labojumi_no_kartes(inv, [o], tikai_atzimetie=True)
-    assert sum(1 for l in lab.values() if l.kailcirte) == 1
+    assert sum(1 for l in lab.values() if l.izveletais_veids() == "kailcirte") == 1
     s = salidzinat(inv, [o], tikai_atzimetie=True)
     rinda = next(r for r in s.rindas if r["Nogabals"] == n.apzimejums)
     assert rinda["Uzmērīts kartē ha"] == pytest.approx(n.platiba_ha / 2, abs=0.01)
@@ -301,7 +301,7 @@ def test_visa_zemes_vieniba_bez_jaunaudzem():
     o = jauns_objekts({"type": "Polygon", "coordinates": [ext]}, "Visa ZV")
     s = salidzinat(inv, [o], nogabalu_robezas=rob)
     sakotnejais = sum(1 for v in atlasit_kailcirtes(inv.nogabali) if v.atlauta_kailcirte)
-    assert sum(r["Cirsmā pēc"] for r in s.rindas) == sakotnejais
+    assert sum(r["Cirte pēc"] == "Kailcirte" for r in s.rindas) == sakotnejais
     assert any(r["Piezīme"].startswith("⚠ Atzīmēts kartē") for r in s.rindas)
     s2 = salidzinat(inv, [o], nogabalu_robezas=rob, ieklaut_neatbilstosos=True)
     assert s2.pec.kopejais_m3 > s.pec.kopejais_m3
@@ -361,3 +361,35 @@ def test_mvr_privats_repo_ar_tokenu(monkeypatch):
     assert pedejais.get_header("Accept") == "application/octet-stream"
     # Tokens netiek pārsūtīts pāradresācijā (S3)
     assert "Authorization" in pedejais.unredirected_hdrs and "Authorization" not in pedejais.headers
+
+
+def test_automatiskas_cirsmas_sadala_lielu_nogabalu():
+    """3,2 ha slapjajā damaksnī -> kailcirte 2 ha + josla 0,5 ha + kailcirte 0,7 ha."""
+    from cirsma.parser import Inventarizacija, Nogabals
+    from karte.geometrija import lks_geometrija, mervienibas
+    from karte.parrekins import (
+        JOSLAS_STATUSS, automatiskas_cirsmas, blakus_kailcirsu_bridinajumi, labojumi_no_kartes,
+    )
+    from cirsma.labojumi import novertet_ar_labojumiem
+
+    n = Nogabals(nr=1, platiba_ha=3.2, zemes_veids="Mežaudze", meza_tips="Dms", formula="10B75",
+                 bonitate="I", vid_augstums=24, vid_caurmers=26, vecums=75, kraja_m3_ha=250)
+    inv = Inventarizacija(zemes_vieniba=None, ipasums=None, nogabali=[n])
+    g = _kvadrats_lks(500_000, 300_000, (3.2 * 10_000) ** 0.5)
+    obj = automatiskas_cirsmas(inv, {n.apzimejums: g})
+    statusi = [o["statuss"] for o in obj]
+    assert statusi == ["Kailcirte", JOSLAS_STATUSS, "Kailcirte"]
+    ha = [round(mervienibas(o["geometry"])["platiba_ha"], 2) for o in obj]
+    assert ha == pytest.approx([2.0, 0.5, 0.7], abs=0.01)
+    assert blakus_kailcirsu_bridinajumi(obj, inv, {n.apzimejums: g}) == []   # josla atdala
+    lab = labojumi_no_kartes(inv, obj, nogabalu_robezas={n.apzimejums: g})
+    v = novertet_ar_labojumiem(inv.nogabali, lab)[0]
+    assert v.kailcirtes_ha == pytest.approx([2.0, 0.7], abs=0.01)
+    # bez joslas abas kailcirtes saskaras -> brīdinājums
+    bez_joslas = [o for o in obj if o["statuss"] != JOSLAS_STATUSS]
+    from shapely.geometry import mapping
+    from karte.geometrija import wgs_geometrija
+    a, b = (lks_geometrija(o["geometry"]) for o in bez_joslas)
+    bez_joslas[1] = dict(bez_joslas[1], geometry=wgs_geometrija(b.buffer(60).difference(a.buffer(-0.5)).intersection(
+        lks_geometrija(g))))
+    assert blakus_kailcirsu_bridinajumi(bez_joslas, inv, {n.apzimejums: g})
